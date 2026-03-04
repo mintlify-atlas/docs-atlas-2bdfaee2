@@ -1,0 +1,139 @@
+{
+  "projectType": "infrastructure",
+  "projectName": "Talos Linux",
+  "projectDescription": "A modern, secure, immutable Linux distribution built for Kubernetes",
+  "theme": "aspen",
+  "primaryColor": "#f46721",
+  "lightColor": "#e53a47",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/components",
+              "architecture/security-model",
+              "architecture/networking"
+            ]
+          },
+          {
+            "group": "Installation & Deployment",
+            "pages": [
+              "deployment/platforms",
+              "deployment/bare-metal",
+              "deployment/aws",
+              "deployment/gcp",
+              "deployment/azure",
+              "deployment/docker",
+              "deployment/kubernetes-in-docker"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/overview",
+              "configuration/machine-config",
+              "configuration/cluster-config",
+              "configuration/network-config",
+              "configuration/storage-config",
+              "configuration/extensions"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/cluster-management",
+              "operations/upgrades",
+              "operations/etcd-management",
+              "operations/troubleshooting",
+              "operations/disaster-recovery"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "security/overview",
+              "security/certificates",
+              "security/authentication",
+              "security/hardening"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "cli/overview",
+              "cli/talosctl",
+              "cli/cluster-commands",
+              "cli/node-commands",
+              "cli/config-commands"
+            ]
+          },
+          {
+            "group": "gRPC API",
+            "pages": [
+              "api/overview",
+              "api/machine-service",
+              "api/cluster-service",
+              "api/inspect-service",
+              "api/common-types"
+            ]
+          },
+          {
+            "group": "Configuration API",
+            "pages": [
+              "config-api/overview",
+              "config-api/machine-config",
+              "config-api/cluster-config",
+              "config-api/network-config",
+              "config-api/block-storage"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Secure, immutable Linux OS designed for Kubernetes",
+    "API-driven management with no SSH or shell access",
+    "Atomic updates and configuration management",
+    "Multi-platform support (bare metal, cloud providers, containers)",
+    "Built-in etcd for control plane nodes",
+    "Comprehensive gRPC API for all system operations",
+    "talosctl CLI for cluster lifecycle management",
+    "Image builder and provisioning tools"
+  ],
+  "publicApiSurface": [
+    "MachineService.ApplyConfiguration",
+    "MachineService.Bootstrap",
+    "MachineService.Reboot",
+    "MachineService.Upgrade",
+    "MachineService.EtcdSnapshot",
+    "MachineService.EtcdRecover",
+    "ClusterService.HealthCheck",
+    "talosctl cluster create",
+    "talosctl bootstrap",
+    "talosctl upgrade",
+    "talosctl apply-config",
+    "talosctl gen config",
+    "MachineConfig",
+    "ClusterConfig",
+    "NetworkConfig"
+  ]
+}
