@@ -1,0 +1,337 @@
+---
+title: Bare Metal Deployment
+description: Deploy Talos Linux on physical servers using PXE, ISO, or USB boot methods
+---
+
+Talos Linux can be deployed on bare metal servers using several boot methods. This guide covers PXE boot, ISO, and USB installation.
+
+## Boot Methods
+
+Talos supports three primary boot methods for bare metal:
+
+1. **PXE Boot** - Network boot for automated deployments
+2. **ISO Boot** - Boot from ISO image (CD/DVD or virtual media)
+3. **USB Boot** - Boot from USB drive
+
+## Prerequisites
+
+- Physical server with:
+  - x86-64 (amd64) or ARM64 (arm64) CPU
+  - Minimum 2GB RAM (4GB+ recommended)
+  - At least 10GB disk space
+  - Network connectivity
+- Talos Linux boot media (ISO, USB, or PXE server)
+
+## Method 1: ISO Installation
+
+### Download ISO
+
+Download the latest Talos ISO:
+
+```bash
+curl -LO https://github.com/siderolabs/talos/releases/latest/download/metal-amd64.iso
+# For ARM64:
+curl -LO https://github.com/siderolabs/talos/releases/latest/download/metal-arm64.iso
+```
+
+### Boot from ISO
+
+<Steps>
+  <Step title="Prepare Boot Media">
+    Burn the ISO to a CD/DVD or configure your BMC/IPMI for virtual media mount.
+  </Step>
+  
+  <Step title="Boot the Server">
+    Boot the server from the ISO. The system will load into Talos maintenance mode.
+  </Step>
+  
+  <Step title="Generate Configuration">
+    Generate machine configuration:
+    
+    ```bash
+    talosctl gen config my-cluster https://controlplane.example.com:6443
+    ```
+    
+    This creates:
+    - `controlplane.yaml` - Control plane node configuration
+    - `worker.yaml` - Worker node configuration  
+    - `talosconfig` - CLI configuration
+  </Step>
+  
+  <Step title="Apply Configuration">
+    Apply configuration to the node:
+    
+    ```bash
+    talosctl apply-config --insecure \
+      --nodes 192.168.1.10 \
+      --file controlplane.yaml
+    ```
+  </Step>
+  
+  <Step title="Install to Disk">
+    The system will automatically install to disk and reboot.
+  </Step>
+</Steps>
+
+### ISO with Embedded Configuration
+
+You can create an ISO with embedded configuration:
+
+```bash
+# Create ISO with embedded config
+docker run --rm -i \
+  -v $PWD/_out:/out \
+  -v $PWD/controlplane.yaml:/controlplane.yaml:ro \
+  ghcr.io/siderolabs/imager:latest \
+  iso --arch amd64 --config /controlplane.yaml
+```
+
+The ISO will read configuration from the `metal:iso` label:
+
+```yaml
+# Referenced in kernel params as:
+talos.config=metal:iso
+```
+
+## Method 2: USB Installation
+
+### Create Bootable USB
+
+Write the ISO to a USB drive:
+
+```bash
+# On Linux/macOS (replace /dev/sdX with your USB device)
+sudo dd if=metal-amd64.iso of=/dev/sdX bs=4M status=progress
+sudo sync
+```
+
+```powershell
+# On Windows (using Rufus or similar tool)
+# Or use dd for Windows
+```
+
+<Warning>
+  The `dd` command will erase all data on the target device. Verify the device path carefully.
+</Warning>
+
+### Boot from USB
+
+Follow the same steps as ISO installation after booting from USB.
+
+## Method 3: PXE Boot
+
+PXE boot enables network-based installation for large-scale deployments.
+
+### PXE Server Setup
+
+<Steps>
+  <Step title="Download PXE Assets">
+    Download kernel and initramfs:
+    
+    ```bash
+    mkdir -p /var/lib/tftpboot/talos
+    cd /var/lib/tftpboot/talos
+    
+    # Download kernel
+    curl -LO https://github.com/siderolabs/talos/releases/latest/download/vmlinuz-amd64
+    
+    # Download initramfs
+    curl -LO https://github.com/siderolabs/talos/releases/latest/download/initramfs-amd64.xz
+    ```
+  </Step>
+  
+  <Step title="Configure DHCP">
+    Configure your DHCP server to provide PXE boot options:
+    
+    ```conf
+    # dnsmasq example
+    dhcp-boot=pxelinux.0
+    enable-tftp
+    tftp-root=/var/lib/tftpboot
+    ```
+  </Step>
+  
+  <Step title="Configure PXE Boot Menu">
+    Create PXE boot configuration:
+    
+    ```text /var/lib/tftpboot/pxelinux.cfg/default
+    DEFAULT talos
+    
+    LABEL talos
+      KERNEL talos/vmlinuz-amd64
+      INITRD talos/initramfs-amd64.xz
+      APPEND talos.platform=metal talos.config=http://192.168.1.1:8080/config.yaml
+    ```
+  </Step>
+  
+  <Step title="Host Configuration">
+    Set up HTTP server to host machine configs:
+    
+    ```bash
+    # Serve configs on port 8080
+    python3 -m http.server 8080
+    ```
+  </Step>
+  
+  <Step title="Boot Nodes">
+    Configure servers to boot via PXE (network boot) in BIOS/UEFI.
+  </Step>
+</Steps>
+
+### PXE Configuration Server
+
+For dynamic configuration, use URL templating:
+
+```bash
+# Boot with UUID-based config URL
+talos.config=http://config-server:8080/config?uuid=${uuid}&mac=${mac}
+```
+
+The Talos provisioner includes built-in DHCP and TFTP servers:
+
+```go
+// From pkg/provision/providers/vm/dhcpd.go
+// Automatic DHCP server for PXE boot
+type DHCPd struct {
+    Listener *net.UDPConn
+    TFTPServer string
+    IPXEBootFilename string
+}
+```
+
+## Platform-Specific Configuration
+
+### Console Configuration
+
+Bare metal uses different consoles based on architecture:
+
+<CodeGroup>
+```yaml amd64
+machine:
+  install:
+    extraKernelArgs:
+      - console=ttyS0  # Serial console
+      - console=tty0   # VGA console
+```
+
+```yaml arm64  
+machine:
+  install:
+    extraKernelArgs:
+      - console=ttyAMA0  # ARM serial
+      - console=tty0     # VGA console
+```
+</CodeGroup>
+
+### Disk Configuration
+
+Specify installation disk:
+
+```yaml
+machine:
+  install:
+    disk: /dev/sda
+    image: ghcr.io/siderolabs/installer:latest
+    wipe: false
+```
+
+### Network Configuration
+
+Configure static networking:
+
+```yaml
+machine:
+  network:
+    hostname: node1
+    interfaces:
+      - interface: eth0
+        addresses:
+          - 192.168.1.10/24
+        routes:
+          - network: 0.0.0.0/0
+            gateway: 192.168.1.1
+    nameservers:
+      - 8.8.8.8
+      - 1.1.1.1
+```
+
+## Post-Installation
+
+After installation completes:
+
+### Bootstrap Kubernetes
+
+On the first control plane node:
+
+```bash
+talosctl bootstrap --nodes 192.168.1.10
+```
+
+### Retrieve kubeconfig
+
+```bash
+talosctl kubeconfig --nodes 192.168.1.10
+```
+
+### Verify Cluster
+
+```bash
+kubectl get nodes
+```
+
+## Advanced Options
+
+### UEFI Boot
+
+For UEFI systems, use UEFI-compatible boot:
+
+```bash
+# UEFI PXE boot uses grub.cfg instead of pxelinux
+```
+
+### Secure Boot
+
+Talos supports UEFI Secure Boot with signed kernels.
+
+### Custom Image
+
+Build custom installer images with additional drivers:
+
+```bash
+docker run --rm -i \
+  -v /dev:/dev --privileged \
+  ghcr.io/siderolabs/imager:latest \
+  iso --arch amd64 \
+  --system-extension-image ghcr.io/siderolabs/amd-ucode:latest
+```
+
+## Troubleshooting
+
+### Boot Issues
+
+- Verify BIOS/UEFI boot order
+- Check serial console connection
+- Review kernel parameters
+
+### Network Issues  
+
+- Verify network cable connection
+- Check DHCP server logs
+- Test PXE server connectivity
+
+### Installation Failures
+
+- Check disk availability: `talosctl disks --insecure --nodes <ip>`
+- Review logs: `talosctl logs --insecure --nodes <ip>`
+- Verify configuration: `talosctl validate --config controlplane.yaml`
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/configuration/overview">
+    Learn about machine configuration
+  </Card>
+  <Card title="Networking" icon="network-wired" href="/networking/overview">
+    Configure advanced networking
+  </Card>
+</CardGroup>

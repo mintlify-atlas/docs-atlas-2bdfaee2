@@ -1,0 +1,321 @@
+---
+title: Upgrades
+description: Upgrade Talos Linux and Kubernetes versions with zero downtime using rolling upgrades.
+---
+
+Talos Linux supports zero-downtime upgrades for both the Talos operating system and Kubernetes. Upgrades are performed in-place using the installer image, with automatic health checks and rollback capabilities.
+
+## Upgrading Talos Linux
+
+Talos upgrades are performed by specifying a new installer image. The upgrade process downloads the new image, installs it, and reboots the node.
+
+### Checking Current Version
+
+First, check the current Talos version:
+
+```bash
+talosctl --nodes 10.0.0.2 version
+```
+
+Example output:
+```
+Client:
+  Tag:         v1.6.0
+  Go version:  go1.21.5
+Server:
+  NODE         10.0.0.2
+  Tag:         v1.5.5
+  Go version:  go1.21.4
+```
+
+### Performing a Node Upgrade
+
+Upgrade a single node to the latest version:
+
+```bash
+talosctl upgrade --nodes 10.0.0.2 \
+  --image ghcr.io/siderolabs/installer:v1.6.0
+```
+
+The upgrade command supports several important flags:
+
+- `--preserve`: Preserve data during upgrade (default behavior)
+- `--stage`: Stage the upgrade to be applied on next reboot
+- `--force`: Skip health checks (use with caution)
+- `--reboot-mode`: Control reboot behavior (`default`, `powercycle`)
+
+### Upgrade with Wait
+
+Wait for the upgrade to complete and verify the node comes back healthy:
+
+```bash
+talosctl upgrade --nodes 10.0.0.2 \
+  --image ghcr.io/siderolabs/installer:v1.6.0 \
+  --wait
+```
+
+Example output:
+```
+NODE         ACK      STARTED
+10.0.0.2     true     2024-03-04T10:15:30Z
+
+waiting for node reboot...
+node rebooted
+waiting for node to be ready...
+node is ready
+```
+
+### Staged Upgrades
+
+Stage an upgrade to be applied on the next reboot:
+
+```bash
+talosctl upgrade --nodes 10.0.0.2 \
+  --image ghcr.io/siderolabs/installer:v1.6.0 \
+  --stage
+```
+
+This allows you to control when the node reboots:
+
+```bash
+talosctl reboot --nodes 10.0.0.2
+```
+
+### Upgrading the Entire Cluster
+
+<Warning>
+  Always upgrade control plane nodes one at a time to maintain etcd quorum and cluster availability.
+</Warning>
+
+<Steps>
+  <Step title="Upgrade control plane nodes sequentially">
+    Upgrade each control plane node one at a time:
+
+    ```bash
+    talosctl upgrade --nodes 10.0.0.2 \
+      --image ghcr.io/siderolabs/installer:v1.6.0 \
+      --wait
+    
+    talosctl upgrade --nodes 10.0.0.3 \
+      --image ghcr.io/siderolabs/installer:v1.6.0 \
+      --wait
+    
+    talosctl upgrade --nodes 10.0.0.4 \
+      --image ghcr.io/siderolabs/installer:v1.6.0 \
+      --wait
+    ```
+
+    Wait for each node to complete before proceeding to the next.
+  </Step>
+
+  <Step title="Verify control plane health">
+    After upgrading all control plane nodes, verify cluster health:
+
+    ```bash
+    talosctl health \
+      --control-plane-nodes 10.0.0.2,10.0.0.3,10.0.0.4
+    
+    kubectl get nodes
+    ```
+  </Step>
+
+  <Step title="Upgrade worker nodes">
+    Worker nodes can be upgraded in parallel or sequentially depending on your workload:
+
+    ```bash
+    # Upgrade workers one at a time
+    talosctl upgrade --nodes 10.0.0.5 \
+      --image ghcr.io/siderolabs/installer:v1.6.0 \
+      --wait
+    
+    talosctl upgrade --nodes 10.0.0.6 \
+      --image ghcr.io/siderolabs/installer:v1.6.0 \
+      --wait
+    ```
+
+    Kubernetes automatically reschedules pods during worker node upgrades.
+  </Step>
+</Steps>
+
+### Reboot Modes
+
+Talos supports different reboot modes during upgrades:
+
+**Default Mode** (kexec): Fast reboot using kexec
+```bash
+talosctl upgrade --nodes 10.0.0.2 \
+  --image ghcr.io/siderolabs/installer:v1.6.0 \
+  --reboot-mode default
+```
+
+**Powercycle Mode**: Full power cycle (slower but more thorough)
+```bash
+talosctl upgrade --nodes 10.0.0.2 \
+  --image ghcr.io/siderolabs/installer:v1.6.0 \
+  --reboot-mode powercycle
+```
+
+### Rolling Back an Upgrade
+
+If an upgrade fails or causes issues, you can roll back:
+
+```bash
+talosctl rollback --nodes 10.0.0.2
+```
+
+This reverts to the previous Talos version installed on the node.
+
+## Upgrading Kubernetes
+
+Kubernetes upgrades are managed separately from Talos upgrades using the `upgrade-k8s` command.
+
+### Checking Kubernetes Version
+
+Check current Kubernetes version:
+
+```bash
+kubectl version --short
+talosctl --nodes 10.0.0.2 get kubernetesversion
+```
+
+### Upgrading Kubernetes
+
+Upgrade Kubernetes to a new version:
+
+```bash
+talosctl upgrade-k8s --to 1.29.0
+```
+
+The upgrade process:
+1. Detects the current Kubernetes version
+2. Validates the upgrade path
+3. Pre-pulls container images
+4. Updates control plane components
+5. Updates kubelet on all nodes
+6. Applies necessary Kubernetes manifests
+
+### Upgrade from Specific Version
+
+Explicitly specify the source version:
+
+```bash
+talosctl upgrade-k8s \
+  --from 1.28.0 \
+  --to 1.29.0
+```
+
+### Dry Run Mode
+
+Preview the upgrade without making changes:
+
+```bash
+talosctl upgrade-k8s --to 1.29.0 --dry-run
+```
+
+Example output:
+```
+Automatically detected the lowest Kubernetes version 1.28.0
+> Upgrading Kubernetes from v1.28.0 to v1.29.0
+> Will upgrade 3 control plane nodes
+> Will upgrade 2 worker nodes
+> Will pull images:
+  - registry.k8s.io/kube-apiserver:v1.29.0
+  - registry.k8s.io/kube-controller-manager:v1.29.0
+  - registry.k8s.io/kube-scheduler:v1.29.0
+  - registry.k8s.io/kube-proxy:v1.29.0
+```
+
+### Advanced Upgrade Options
+
+**Skip kubelet upgrade** (control plane only):
+```bash
+talosctl upgrade-k8s --to 1.29.0 --upgrade-kubelet=false
+```
+
+**Skip image pre-pulling** (faster but riskier):
+```bash
+talosctl upgrade-k8s --to 1.29.0 --pre-pull-images=false
+```
+
+**Specify custom images**:
+```bash
+talosctl upgrade-k8s --to 1.29.0 \
+  --apiserver-image registry.k8s.io/kube-apiserver:v1.29.0 \
+  --controller-manager-image registry.k8s.io/kube-controller-manager:v1.29.0
+```
+
+### Kubernetes Upgrade Best Practices
+
+1. **Always upgrade one minor version at a time**: Don't skip versions (e.g., 1.27 → 1.28 → 1.29)
+2. **Test in non-production first**: Validate upgrades in staging environments
+3. **Check compatibility**: Ensure workloads are compatible with the target version
+4. **Monitor during upgrade**: Watch pod status and cluster metrics
+5. **Backup etcd before upgrading**: Create an etcd snapshot as a precaution
+
+## Upgrade Maintenance Windows
+
+For production clusters, plan maintenance windows for upgrades:
+
+<Steps>
+  <Step title="Pre-maintenance">
+    - Create etcd backup
+    - Document current versions
+    - Review release notes
+    - Test in staging environment
+  </Step>
+
+  <Step title="During maintenance">
+    - Upgrade control plane nodes sequentially
+    - Verify control plane health between nodes
+    - Upgrade worker nodes
+    - Monitor workload health
+  </Step>
+
+  <Step title="Post-maintenance">
+    - Verify all nodes are at target version
+    - Run health checks
+    - Validate workload functionality
+    - Document upgrade results
+  </Step>
+</Steps>
+
+## Upgrade Troubleshooting
+
+### Node Stuck During Upgrade
+
+If a node doesn't complete the upgrade:
+
+1. Check node status:
+   ```bash
+   talosctl --nodes 10.0.0.2 dmesg
+   talosctl --nodes 10.0.0.2 logs kubelet
+   ```
+
+2. Force reboot if necessary:
+   ```bash
+   talosctl --nodes 10.0.0.2 reboot
+   ```
+
+3. Roll back if issues persist:
+   ```bash
+   talosctl --nodes 10.0.0.2 rollback
+   ```
+
+### etcd Quorum Lost
+
+If etcd loses quorum during upgrade:
+
+1. Check etcd members:
+   ```bash
+   talosctl --nodes 10.0.0.2 etcd members
+   ```
+
+2. Wait for nodes to rejoin or restore from backup (see disaster recovery)
+
+### Kubernetes Components Not Starting
+
+Check component logs:
+```bash
+talosctl --nodes 10.0.0.2 logs kubelet
+kubectl logs -n kube-system kube-apiserver-controlplane-1
+```

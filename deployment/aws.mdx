@@ -1,0 +1,459 @@
+---
+title: AWS Deployment
+description: Deploy Talos Linux on Amazon EC2 instances with native AWS integration
+---
+
+Talos Linux provides native support for AWS EC2 with automatic instance metadata discovery and platform-specific optimizations.
+
+## Overview
+
+The AWS platform integration includes:
+
+- Automatic network configuration via IMDS (Instance Metadata Service)
+- EC2-specific kernel parameters and console configuration
+- NTP server configuration (169.254.169.123)
+- Instance metadata (region, zone, instance type, spot instance detection)
+- User-data based configuration delivery
+
+## Prerequisites
+
+- AWS account with EC2 access
+- AWS CLI configured
+- `talosctl` installed
+- (Optional) Terraform for infrastructure automation
+
+## Quick Start with Official AMI
+
+### Find Talos AMI
+
+Find the latest Talos AMI in your region:
+
+```bash
+aws ec2 describe-images \
+  --owners 540036508848 \
+  --filters "Name=name,Values=talos-v*-amd64" \
+  --region us-west-2 \
+  --query 'Images[*].[ImageId,Name,CreationDate]' \
+  --output table | sort -k3 -r | head -n 5
+```
+
+### Launch Instance
+
+<Steps>
+  <Step title="Generate Configuration">
+    Create machine configuration:
+    
+    ```bash
+    talosctl gen config my-cluster \
+      https://api.my-cluster.example.com:6443 \
+      --config-patch-control-plane @aws-controlplane.yaml
+    ```
+  </Step>
+  
+  <Step title="Launch Control Plane">
+    Launch EC2 instance with user-data:
+    
+    ```bash
+    aws ec2 run-instances \
+      --image-id ami-xxxxx \
+      --instance-type t3.medium \
+      --key-name my-key \
+      --security-group-ids sg-xxxxx \
+      --subnet-id subnet-xxxxx \
+      --user-data file://controlplane.yaml \
+      --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=talos-cp-1}]'
+    ```
+  </Step>
+  
+  <Step title="Get Instance IP">
+    Retrieve the instance IP:
+    
+    ```bash
+    INSTANCE_IP=$(aws ec2 describe-instances \
+      --filters "Name=tag:Name,Values=talos-cp-1" \
+      --query 'Reservations[0].Instances[0].PublicIpAddress' \
+      --output text)
+    ```
+  </Step>
+  
+  <Step title="Bootstrap Cluster">
+    Bootstrap Kubernetes:
+    
+    ```bash
+    talosctl bootstrap --nodes $INSTANCE_IP
+    talosctl kubeconfig --nodes $INSTANCE_IP
+    ```
+  </Step>
+</Steps>
+
+## Terraform Deployment
+
+Use Terraform for production deployments:
+
+<CodeGroup>
+```hcl main.tf
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+# Data source for latest Talos AMI
+data "aws_ami" "talos" {
+  most_recent = true
+  owners      = ["540036508848"] # Sidero Labs
+
+  filter {
+    name   = "name"
+    values = ["talos-v*-amd64"]
+  }
+}
+
+# Control plane instances
+resource "aws_instance" "control_plane" {
+  count         = 3
+  ami           = data.aws_ami.talos.id
+  instance_type = "t3.medium"
+  
+  subnet_id              = aws_subnet.public[count.index].id
+  vpc_security_group_ids = [aws_security_group.talos.id]
+  
+  user_data = file("controlplane.yaml")
+  
+  root_block_device {
+    volume_size = 50
+    volume_type = "gp3"
+    encrypted   = true
+  }
+  
+  tags = {
+    Name = "talos-cp-${count.index + 1}"
+    Role = "control-plane"
+  }
+}
+
+# Worker instances
+resource "aws_instance" "worker" {
+  count         = 3
+  ami           = data.aws_ami.talos.id
+  instance_type = "t3.large"
+  
+  subnet_id              = aws_subnet.private[count.index].id
+  vpc_security_group_ids = [aws_security_group.talos.id]
+  
+  user_data = file("worker.yaml")
+  
+  root_block_device {
+    volume_size = 100
+    volume_type = "gp3"
+    encrypted   = true
+  }
+  
+  tags = {
+    Name = "talos-worker-${count.index + 1}"
+    Role = "worker"
+  }
+}
+
+# Network load balancer for control plane
+resource "aws_lb" "control_plane" {
+  name               = "talos-cp-lb"
+  internal           = false
+  load_balancer_type = "network"
+  subnets            = aws_subnet.public[*].id
+  
+  tags = {
+    Name = "talos-control-plane-lb"
+  }
+}
+
+resource "aws_lb_target_group" "control_plane" {
+  name     = "talos-cp-tg"
+  port     = 6443
+  protocol = "TCP"
+  vpc_id   = aws_vpc.main.id
+  
+  health_check {
+    protocol = "TCP"
+    port     = 6443
+  }
+}
+
+resource "aws_lb_listener" "control_plane" {
+  load_balancer_arn = aws_lb.control_plane.arn
+  port              = 6443
+  protocol          = "TCP"
+  
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.control_plane.arn
+  }
+}
+```
+
+```hcl variables.tf
+variable "region" {
+  description = "AWS region"
+  type        = string
+  default     = "us-west-2"
+}
+
+variable "cluster_name" {
+  description = "Cluster name"
+  type        = string
+  default     = "talos-cluster"
+}
+
+variable "vpc_cidr" {
+  description = "VPC CIDR block"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+```
+
+```hcl security-groups.tf
+resource "aws_security_group" "talos" {
+  name        = "talos-cluster-sg"
+  description = "Security group for Talos cluster"
+  vpc_id      = aws_vpc.main.id
+  
+  # Talos API
+  ingress {
+    from_port   = 50000
+    to_port     = 50000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  
+  # Kubernetes API
+  ingress {
+    from_port   = 6443
+    to_port     = 6443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  
+  # Trustd
+  ingress {
+    from_port = 50001
+    to_port   = 50001
+    protocol  = "tcp"
+    self      = true
+  }
+  
+  # Kubelet API
+  ingress {
+    from_port = 10250
+    to_port   = 10250
+    protocol  = "tcp"
+    self      = true
+  }
+  
+  # etcd
+  ingress {
+    from_port = 2379
+    to_port   = 2380
+    protocol  = "tcp"
+    self      = true
+  }
+  
+  # Allow all internal traffic
+  ingress {
+    from_port = 0
+    to_port   = 0
+    protocol  = "-1"
+    self      = true
+  }
+  
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+```
+</CodeGroup>
+
+Apply the Terraform configuration:
+
+```bash
+terraform init
+terraform plan
+terraform apply
+```
+
+## AWS Platform Integration
+
+The AWS platform automatically configures:
+
+### Network Configuration
+
+Talos queries the AWS IMDS for network information:
+
+```go
+// From internal/app/machined/pkg/runtime/v1alpha1/platform/aws/aws.go
+func (a *AWS) NetworkConfiguration(ctx context.Context, _ state.State, ch chan<- *runtime.PlatformNetworkConfig) error {
+    metadata, err := a.getMetadata(ctx)
+    if err != nil {
+        return err
+    }
+    
+    networkConfig := &runtime.PlatformNetworkConfig{
+        TimeServers: []network.TimeServerSpecSpec{{
+            NTPServers: []string{
+                "169.254.169.123",  // IPv4
+                "fd00:ec2::123",     // IPv6
+            },
+        }},
+    }
+    // ...
+}
+```
+
+### Instance Metadata
+
+Automatically discovered metadata:
+
+- Platform: `aws`
+- Region: `us-west-2`
+- Zone: `us-west-2a`
+- Instance Type: `t3.medium`
+- Instance ID: `i-xxxxx`
+- Provider ID: `aws:///us-west-2a/i-xxxxx`
+- Spot Instance: `true/false`
+
+### Kernel Arguments
+
+AWS instances use specific console configuration:
+
+```bash
+console=tty1 console=ttyS0 net.ifnames=0
+```
+
+## Configuration
+
+### Machine Configuration Patches
+
+Common AWS-specific patches:
+
+<CodeGroup>
+```yaml aws-controlplane.yaml
+machine:
+  kubelet:
+    extraArgs:
+      cloud-provider: external
+    nodeIP:
+      validSubnets:
+        - 10.0.0.0/8
+  
+cluster:
+  externalCloudProvider:
+    enabled: true
+    manifests:
+      - https://raw.githubusercontent.com/kubernetes/cloud-provider-aws/master/manifests/rbac.yaml
+      - https://raw.githubusercontent.com/kubernetes/cloud-provider-aws/master/manifests/aws-cloud-controller-manager-daemonset.yaml
+```
+
+```yaml ebs-csi.yaml
+# Enable EBS CSI driver
+cluster:
+  externalCloudProvider:
+    enabled: true
+    manifests:
+      - https://raw.githubusercontent.com/kubernetes-sigs/aws-ebs-csi-driver/master/deploy/kubernetes/base/csidriver.yaml
+```
+</CodeGroup>
+
+## IAM Roles
+
+Create IAM instance profile for nodes:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeRegions",
+        "ec2:DescribeRouteTables",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeVolumes",
+        "ec2:CreateSecurityGroup",
+        "ec2:CreateTags",
+        "ec2:CreateVolume",
+        "ec2:ModifyInstanceAttribute",
+        "ec2:ModifyVolume",
+        "ec2:AttachVolume",
+        "ec2:DetachVolume",
+        "ec2:DeleteVolume",
+        "ec2:DeleteSecurityGroup",
+        "elasticloadbalancing:*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+## Storage
+
+### EBS Volumes
+
+Use EBS for persistent storage:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ebs-claim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 100Gi
+```
+
+## Troubleshooting
+
+### View IMDS Metadata
+
+```bash
+# From instance
+curl http://169.254.169.254/latest/meta-data/
+```
+
+### Check Platform Configuration
+
+```bash
+talosctl get platformmetadata --nodes <node-ip>
+```
+
+### Logs
+
+```bash
+talosctl logs machined --nodes <node-ip>
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Cloud Controller" icon="cloud" href="/kubernetes/cloud-providers">
+    Configure AWS Cloud Controller Manager
+  </Card>
+  <Card title="Load Balancers" icon="balance-scale" href="/networking/load-balancers">
+    Set up AWS load balancing
+  </Card>
+</CardGroup>

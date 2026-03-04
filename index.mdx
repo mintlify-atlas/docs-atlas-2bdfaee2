@@ -1,97 +1,281 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: Talos Linux Documentation
+description: A modern, secure, immutable Linux distribution built for Kubernetes
+mode: custom
 ---
 
-## Setting up
+<div className="relative overflow-hidden bg-gradient-to-br from-[#0A0A0A] via-[#1a0f0a] to-[#0A0A0A] dark:from-[#0A0A0A] dark:via-[#1a0f0a] dark:to-[#0A0A0A] py-20 lg:py-24">
+  <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-[#f46721]/20 via-transparent to-transparent"></div>
+  <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_var(--tw-gradient-stops))] from-[#e53a47]/10 via-transparent to-transparent"></div>
+  
+  <div className="relative max-w-7xl mx-auto px-6 lg:px-8">
+    <div className="lg:grid lg:grid-cols-12 lg:gap-8 items-center">
+      <div className="lg:col-span-7">
+        <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold text-white dark:text-white mb-6 leading-tight">
+          Talos Linux
+        </h1>
+        <p className="text-xl sm:text-2xl text-gray-300 dark:text-gray-300 mb-4 max-w-2xl">
+          A modern OS for Kubernetes
+        </p>
+        <p className="text-base sm:text-lg text-gray-400 dark:text-gray-400 mb-8 max-w-2xl">
+          Secure, immutable, and minimal. All system management is done via an API—no shell or interactive console. Production-ready and supported by Sidero Labs.
+        </p>
+        
+        <div className="flex flex-wrap gap-4">
+          <a 
+            href="/quickstart" 
+            className="inline-flex items-center px-6 py-3 text-base font-semibold text-white bg-gradient-to-r from-[#f46721] to-[#e53a47] rounded-full hover:from-[#e53a47] hover:to-[#f46721] transition-all duration-200 no-underline shadow-lg shadow-[#f46721]/30"
+          >
+            Get Started
+            <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+          </a>
+          <a 
+            href="/architecture/overview" 
+            className="inline-flex items-center px-6 py-3 text-base font-semibold text-white bg-white/10 border border-white/30 rounded-full hover:bg-white/20 hover:border-[#f46721] transition-all duration-200 no-underline backdrop-blur-sm"
+          >
+            Learn More
+          </a>
+        </div>
+      </div>
+      
+      <div className="hidden lg:block lg:col-span-5 mt-12 lg:mt-0">
+        <div className="relative">
+          <div className="absolute inset-0 bg-gradient-to-r from-[#f46721] to-[#e53a47] rounded-2xl blur-3xl opacity-20"></div>
+          <div className="relative bg-[#070707] border border-[#f46721]/30 rounded-2xl p-6 shadow-[0_0_40px_10px_rgba(244,103,33,0.2)]">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm text-gray-400">
+                <span className="text-[#f46721]">$</span>
+                <span>talosctl cluster create</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-gray-400">
+                <span className="text-[#f46721]">$</span>
+                <span>talosctl bootstrap</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-gray-400">
+                <span className="text-[#f46721]">$</span>
+                <span>kubectl get nodes</span>
+              </div>
+              <div className="pl-2 text-xs text-gray-500 font-mono">
+                <div>NAME           STATUS   ROLE</div>
+                <div className="text-green-400">talos-cp-0     Ready    control-plane</div>
+                <div className="text-green-400">talos-worker-0 Ready    worker</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Quick start</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">Get a Talos Kubernetes cluster running in minutes</p>
+  
+  <Steps>
+    <Step title="Install talosctl">
+      Download and install the Talos CLI tool for your platform:
+      
+      ```bash macOS
+      brew install siderolabs/tap/talosctl
+      ```
+      
+      ```bash Linux
+      curl -sL https://talos.dev/install | sh
+      ```
+      
+      ```bash Windows
+      choco install talosctl
+      ```
+    </Step>
+    
+    <Step title="Create a local cluster">
+      Use Docker to create a local Talos cluster for testing:
+      
+      ```bash
+      talosctl cluster create
+      ```
+      
+      This creates a single control plane node and a worker node running in Docker containers.
+      
+      <Note>
+      You need Docker installed and running to create a local cluster.
+      </Note>
+    </Step>
+    
+    <Step title="Bootstrap the cluster">
+      Initialize etcd on the control plane node:
+      
+      ```bash
+      talosctl bootstrap --nodes 10.5.0.2
+      ```
+      
+      Wait for the cluster to be ready (this takes 2-3 minutes).
+    </Step>
+    
+    <Step title="Get kubeconfig">
+      Retrieve the kubeconfig to access your cluster with kubectl:
+      
+      ```bash
+      talosctl kubeconfig .
+      ```
+      
+      Verify the cluster is running:
+      
+      ```bash
+      kubectl get nodes
+      ```
+      
+      <Accordion title="Expected output">
+      ```
+      NAME                     STATUS   ROLES           AGE   VERSION
+      talos-default-cp-1       Ready    control-plane   2m    v1.35.2
+      talos-default-worker-1   Ready    worker          2m    v1.35.2
+      ```
+      </Accordion>
+    </Step>
+  </Steps>
+</div>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Why Talos?</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">Built from the ground up for Kubernetes</p>
+  
+  <CardGroup cols={3}>
+    <Card title="Secure by default" icon="shield-halved" href="/security/overview">
+      Minimal attack surface with no SSH, no shell, and immutable infrastructure. All API access secured with mutual TLS.
+    </Card>
+    <Card title="API-driven" icon="code" href="/api/overview">
+      Everything is managed via gRPC API. Declarative configuration with version control and GitOps-ready.
+    </Card>
+    <Card title="Cloud-native" icon="cloud" href="/deployment/platforms">
+      Runs anywhere—bare metal, AWS, GCP, Azure, or your laptop. Same image, same experience everywhere.
+    </Card>
+    <Card title="Immutable" icon="lock" href="/architecture/overview">
+      No package managers, no configuration drift. Atomic updates with instant rollback capability.
+    </Card>
+    <Card title="Minimal footprint" icon="microchip" href="/architecture/components">
+      Boots in seconds with a tiny memory footprint. Built on musl libc with only essential components.
+    </Card>
+    <Card title="Production-ready" icon="rocket" href="/operations/cluster-management">
+      Battle-tested in production. Automated upgrades, backup/restore, and comprehensive observability.
+    </Card>
+  </CardGroup>
+</div>
 
-## Make it yours
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Explore the documentation</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">Comprehensive guides for deployment, configuration, and operations</p>
+  
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <a href="/architecture/overview" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#f46721] dark:hover:border-[#f46721] overflow-hidden no-underline transition-all duration-200">
+      <div className="h-56 bg-gradient-to-br from-[#f46721]/10 to-[#e53a47]/10 flex items-center justify-center overflow-hidden">
+        <svg className="w-24 h-24 text-[#f46721]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+        </svg>
+      </div>
+      <div className="p-6 bg-white dark:bg-[#1a1d27]">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">Architecture</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Understand how Talos works under the hood, from boot to cluster orchestration.</p>
+        <div className="flex items-center text-sm text-[#f46721] group-hover:text-[#e53a47]">
+          <span>Learn more</span>
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+    
+    <a href="/deployment/platforms" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#f46721] dark:hover:border-[#f46721] overflow-hidden no-underline transition-all duration-200">
+      <div className="h-56 bg-gradient-to-br from-[#f46721]/10 to-[#e53a47]/10 flex items-center justify-center overflow-hidden">
+        <svg className="w-24 h-24 text-[#f46721]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      </div>
+      <div className="p-6 bg-white dark:bg-[#1a1d27]">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">Platform deployment</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Deploy on bare metal, AWS, GCP, Azure, or run locally with Docker.</p>
+        <div className="flex items-center text-sm text-[#f46721] group-hover:text-[#e53a47]">
+          <span>View platforms</span>
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+    
+    <a href="/configuration/overview" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#f46721] dark:hover:border-[#f46721] overflow-hidden no-underline transition-all duration-200">
+      <div className="h-56 bg-gradient-to-br from-[#f46721]/10 to-[#e53a47]/10 flex items-center justify-center overflow-hidden">
+        <svg className="w-24 h-24 text-[#f46721]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+      </div>
+      <div className="p-6 bg-white dark:bg-[#1a1d27]">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">Configuration</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Configure machine settings, networking, storage, and cluster parameters.</p>
+        <div className="flex items-center text-sm text-[#f46721] group-hover:text-[#e53a47]">
+          <span>Read guide</span>
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+    
+    <a href="/cli/overview" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#f46721] dark:hover:border-[#f46721] overflow-hidden no-underline transition-all duration-200">
+      <div className="h-56 bg-gradient-to-br from-[#f46721]/10 to-[#e53a47]/10 flex items-center justify-center overflow-hidden">
+        <svg className="w-24 h-24 text-[#f46721]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+        </svg>
+      </div>
+      <div className="p-6 bg-white dark:bg-[#1a1d27]">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">CLI reference</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Complete reference for all talosctl commands and options.</p>
+        <div className="flex items-center text-sm text-[#f46721] group-hover:text-[#e53a47]">
+          <span>Explore CLI</span>
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+  </div>
+</div>
 
-Design a docs site that looks great and empowers your users.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Community & support</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">Join the Talos community</p>
+  
+  <CardGroup cols={2}>
+    <Card title="GitHub Discussions" icon="github" href="https://github.com/siderolabs/talos/discussions">
+      Ask questions, share feedback, and connect with other Talos users.
+    </Card>
+    <Card title="Slack Community" icon="slack" href="https://slack.dev/talos">
+      Join our Slack workspace for real-time discussions and support.
+    </Card>
+  </CardGroup>
+</div>
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
-
-## Create beautiful pages
-
-Everything you need to create world-class documentation.
-
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<div className="mt-20 mb-16 max-w-5xl mx-auto px-6">
+  <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#f46721] to-[#e53a47] p-12 text-center">
+    <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10"></div>
+    <div className="relative">
+      <h2 className="text-3xl font-bold text-white mb-4">Ready to get started?</h2>
+      <p className="text-lg text-white/90 mb-8 max-w-2xl mx-auto">
+        Deploy your first Talos Kubernetes cluster in minutes.
+      </p>
+      <a 
+        href="/quickstart" 
+        className="inline-flex items-center px-8 py-4 text-base font-semibold text-[#f46721] bg-white rounded-full hover:bg-gray-100 transition-all duration-200 no-underline shadow-lg"
+      >
+        Start building
+        <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+        </svg>
+      </a>
+    </div>
+  </div>
+</div>

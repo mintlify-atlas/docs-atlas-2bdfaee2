@@ -1,0 +1,596 @@
+---
+title: Node Commands
+description: Commands for node operations including reboot, upgrade, reset, and shutdown
+---
+
+## Overview
+
+Node commands perform operations on running Talos nodes, including lifecycle management, upgrades, and maintenance tasks.
+
+## reboot
+
+Reboot a Talos node.
+
+```bash
+talosctl reboot [flags]
+```
+
+### Description
+
+Reboots one or more Talos nodes. The command can wait for the reboot to complete and verify the node comes back online.
+
+### Flags
+
+<ParamField path="--mode" type="string" default="default">
+  Select the reboot mode
+  
+  **Options:**
+  - `default` - Standard reboot with kexec
+  - `powercycle` - Skip kexec and reboot with power cycle
+  - `force` - Skip graceful teardown (emergency use only)
+  
+  Short flag: `-m`
+  
+  **Example:**
+  ```bash
+  talosctl reboot --mode powercycle
+  ```
+</ParamField>
+
+<ParamField path="--wait" type="boolean" default="false">
+  Wait for the reboot to complete and node to be ready
+  
+  **Example:**
+  ```bash
+  talosctl reboot --wait
+  ```
+</ParamField>
+
+<ParamField path="--timeout" type="duration" default="30m">
+  Timeout to wait for the operation
+  
+  Only applicable when `--wait` is used.
+  
+  **Example:**
+  ```bash
+  talosctl reboot --wait --timeout 10m
+  ```
+</ParamField>
+
+<ParamField path="--debug" type="boolean" default="false">
+  Enable debug mode (implies --wait)
+  
+  **Example:**
+  ```bash
+  talosctl reboot --debug
+  ```
+</ParamField>
+
+### Examples
+
+**Reboot a single node**
+```bash
+talosctl -n 10.5.0.2 reboot
+```
+
+**Reboot and wait for completion**
+```bash
+talosctl -n 10.5.0.2 reboot --wait
+```
+
+**Force reboot with power cycle**
+```bash
+talosctl -n 10.5.0.2 reboot --mode powercycle
+```
+
+**Reboot with debug output**
+```bash
+talosctl -n 10.5.0.2 reboot --debug
+```
+
+**Output:**
+```
+node 10.5.0.2: rebooting
+waiting for node to reboot...
+node 10.5.0.2: reboot successful
+```
+
+---
+
+## shutdown
+
+Shutdown a Talos node.
+
+```bash
+talosctl shutdown [flags]
+```
+
+### Description
+
+Shuts down one or more Talos nodes gracefully, cordoning and draining Kubernetes workloads if applicable.
+
+### Flags
+
+<ParamField path="--force" type="boolean" default="false">
+  Force a node to shutdown without cordon/drain
+  
+  **Example:**
+  ```bash
+  talosctl shutdown --force
+  ```
+</ParamField>
+
+<ParamField path="--wait" type="boolean" default="false">
+  Wait for the shutdown to complete
+  
+  **Example:**
+  ```bash
+  talosctl shutdown --wait
+  ```
+</ParamField>
+
+<ParamField path="--timeout" type="duration" default="30m">
+  Timeout to wait for the operation
+  
+  **Example:**
+  ```bash
+  talosctl shutdown --wait --timeout 10m
+  ```
+</ParamField>
+
+<ParamField path="--debug" type="boolean" default="false">
+  Enable debug mode (implies --wait)
+</ParamField>
+
+### Examples
+
+**Shutdown a node gracefully**
+```bash
+talosctl -n 10.5.0.3 shutdown
+```
+
+**Force shutdown without draining**
+```bash
+talosctl -n 10.5.0.3 shutdown --force
+```
+
+**Shutdown and wait**
+```bash
+talosctl -n 10.5.0.3 shutdown --wait
+```
+
+**Output:**
+```
+node 10.5.0.3: shutting down
+```
+
+---
+
+## upgrade
+
+Upgrade Talos on the target node.
+
+```bash
+talosctl upgrade [flags]
+```
+
+### Description
+
+Upgrades the Talos installation on one or more nodes to a specified version. The upgrade can be staged to apply after a manual reboot.
+
+### Flags
+
+<ParamField path="--image" type="string">
+  The container image to use for performing the upgrade
+  
+  **Default:** Latest Talos installer image
+  
+  Short flag: `-i`
+  
+  **Example:**
+  ```bash
+  talosctl upgrade --image ghcr.io/siderolabs/installer:v1.8.0
+  ```
+</ParamField>
+
+<ParamField path="--reboot-mode" type="string" default="default">
+  Select the reboot mode during upgrade
+  
+  **Options:**
+  - `default` - Standard reboot
+  - `powercycle` - Bypass kexec
+  
+  Short flag: `-m`
+  
+  **Example:**
+  ```bash
+  talosctl upgrade -i ghcr.io/siderolabs/installer:v1.8.0 --reboot-mode powercycle
+  ```
+</ParamField>
+
+<ParamField path="--stage" type="boolean" default="false">
+  Stage the upgrade to perform it after a reboot
+  
+  Short flag: `-s`
+  
+  **Example:**
+  ```bash
+  talosctl upgrade --image ghcr.io/siderolabs/installer:v1.8.0 --stage
+  ```
+</ParamField>
+
+<ParamField path="--force" type="boolean" default="false">
+  Force the upgrade (skip checks on etcd health and members)
+  
+  **Warning:** Might lead to data loss
+  
+  Short flag: `-f`
+  
+  **Example:**
+  ```bash
+  talosctl upgrade -i ghcr.io/siderolabs/installer:v1.8.0 --force
+  ```
+</ParamField>
+
+<ParamField path="--wait" type="boolean" default="false">
+  Wait for the upgrade to complete
+  
+  **Example:**
+  ```bash
+  talosctl upgrade -i ghcr.io/siderolabs/installer:v1.8.0 --wait
+  ```
+</ParamField>
+
+<ParamField path="--timeout" type="duration" default="30m">
+  Timeout to wait for the operation
+</ParamField>
+
+<ParamField path="--debug" type="boolean" default="false">
+  Enable debug mode (implies --wait)
+</ParamField>
+
+<ParamField path="--insecure" type="boolean" default="false">
+  Upgrade using the insecure (encrypted with no auth) maintenance service
+</ParamField>
+
+### Examples
+
+**Upgrade to specific version**
+```bash
+talosctl -n 10.5.0.2 upgrade --image ghcr.io/siderolabs/installer:v1.8.0
+```
+
+**Stage an upgrade**
+```bash
+talosctl -n 10.5.0.2 upgrade \
+  --image ghcr.io/siderolabs/installer:v1.8.0 \
+  --stage
+```
+
+**Upgrade and wait for completion**
+```bash
+talosctl -n 10.5.0.2 upgrade \
+  --image ghcr.io/siderolabs/installer:v1.8.0 \
+  --wait
+```
+
+**Force upgrade on a degraded node**
+```bash
+talosctl -n 10.5.0.2 upgrade \
+  --image ghcr.io/siderolabs/installer:v1.8.0 \
+  --force
+```
+
+**Output:**
+```
+NODE         ACK     STARTED
+10.5.0.2     v1.8.0  2024-01-15T10:30:00Z
+```
+
+---
+
+## reset
+
+Reset a Talos node to factory defaults.
+
+```bash
+talosctl reset [flags]
+```
+
+### Description
+
+Resets a node by wiping system disk(s) and optionally rebooting. This operation removes all data and returns the node to a clean state.
+
+### Flags
+
+<ParamField path="--graceful" type="boolean" default="true">
+  Attempt to cordon/drain node and leave etcd (if applicable)
+  
+  **Example:**
+  ```bash
+  talosctl reset --graceful=false
+  ```
+</ParamField>
+
+<ParamField path="--reboot" type="boolean" default="false">
+  Reboot the node after resetting instead of shutting down
+  
+  **Example:**
+  ```bash
+  talosctl reset --reboot
+  ```
+</ParamField>
+
+<ParamField path="--wipe-mode" type="string" default="all">
+  Disk reset mode
+  
+  **Options:**
+  - `all` - Wipe system disk and user disks
+  - `system-disk` - Wipe only system disk
+  - `user-disks` - Wipe only user disks
+  
+  **Example:**
+  ```bash
+  talosctl reset --wipe-mode system-disk
+  ```
+</ParamField>
+
+<ParamField path="--user-disks-to-wipe" type="string[]">
+  List of user disk devices to wipe
+  
+  **Example:**
+  ```bash
+  talosctl reset --user-disks-to-wipe /dev/sdb,/dev/sdc
+  ```
+</ParamField>
+
+<ParamField path="--system-labels-to-wipe" type="string[]">
+  System disk partitions to wipe by label
+  
+  Wipes only selected partitions but keeps others intact.
+  
+  **Example:**
+  ```bash
+  talosctl reset --system-labels-to-wipe STATE,EPHEMERAL
+  ```
+</ParamField>
+
+<ParamField path="--insecure" type="boolean" default="false">
+  Reset using the insecure (encrypted with no auth) maintenance service
+  
+  **Example:**
+  ```bash
+  talosctl reset --insecure
+  ```
+</ParamField>
+
+<ParamField path="--wait" type="boolean" default="false">
+  Wait for the reset to complete
+</ParamField>
+
+<ParamField path="--timeout" type="duration" default="30m">
+  Timeout to wait for the operation
+</ParamField>
+
+<ParamField path="--debug" type="boolean" default="false">
+  Enable debug mode (implies --wait)
+</ParamField>
+
+### Examples
+
+**Reset a node (default behavior)**
+```bash
+talosctl -n 10.5.0.4 reset
+```
+
+**Reset and reboot**
+```bash
+talosctl -n 10.5.0.4 reset --reboot
+```
+
+**Reset only system disk**
+```bash
+talosctl -n 10.5.0.4 reset --wipe-mode system-disk
+```
+
+**Reset specific user disks**
+```bash
+talosctl -n 10.5.0.4 reset --user-disks-to-wipe /dev/sdb,/dev/sdc
+```
+
+**Reset with insecure mode**
+```bash
+talosctl -n 10.5.0.4 reset --insecure --reboot
+```
+
+**Wipe only specific partitions**
+```bash
+talosctl -n 10.5.0.4 reset --system-labels-to-wipe EPHEMERAL
+```
+
+**Output:**
+```
+node 10.5.0.4: resetting
+```
+
+---
+
+## bootstrap
+
+Bootstrap the etcd cluster on the specified node.
+
+```bash
+talosctl bootstrap [flags]
+```
+
+### Description
+
+When a Talos cluster is created, etcd services on control plane nodes enter a join loop waiting for other members. One node should be selected as the bootstrap node to initialize the etcd cluster.
+
+**Important:** This command should not be used when "init" type nodes are configured.
+
+### Flags
+
+<ParamField path="--recover-from" type="string">
+  Recover etcd cluster from a snapshot file
+  
+  **Example:**
+  ```bash
+  talosctl bootstrap --recover-from ./etcd-snapshot.db
+  ```
+</ParamField>
+
+<ParamField path="--recover-skip-hash-check" type="boolean" default="false">
+  Skip integrity check when recovering etcd
+  
+  Use when recovering from a data directory copy.
+  
+  **Example:**
+  ```bash
+  talosctl bootstrap --recover-from ./etcd-snapshot.db --recover-skip-hash-check
+  ```
+</ParamField>
+
+### Examples
+
+**Bootstrap etcd on the first control plane node**
+```bash
+talosctl -n 10.5.0.2 bootstrap
+```
+
+**Recover from an etcd snapshot**
+```bash
+talosctl -n 10.5.0.2 bootstrap --recover-from ./etcd-backup.db
+```
+
+**Output:**
+```
+recovering from snapshot "./etcd-backup.db": hash 5a3c2f1e, revision 12345, total keys 100, total size 1048576
+bootstrapping etcd cluster
+```
+
+---
+
+## version
+
+Print version information for client and server.
+
+```bash
+talosctl version [flags]
+```
+
+### Description
+
+Displays version information for both the talosctl client and the Talos nodes.
+
+### Flags
+
+<ParamField path="--client" type="boolean" default="false">
+  Print client version only
+  
+  **Example:**
+  ```bash
+  talosctl version --client
+  ```
+</ParamField>
+
+<ParamField path="--short" type="boolean" default="false">
+  Print the short version
+  
+  **Example:**
+  ```bash
+  talosctl version --short
+  ```
+</ParamField>
+
+<ParamField path="--insecure" type="boolean" default="false">
+  Use Talos maintenance mode API
+  
+  Short flag: `-i`
+  
+  **Example:**
+  ```bash
+  talosctl version --insecure
+  ```
+</ParamField>
+
+### Examples
+
+**Show all version information**
+```bash
+talosctl version
+```
+
+**Show only client version**
+```bash
+talosctl version --client
+```
+
+**Show short version**
+```bash
+talosctl version --short
+```
+
+**Output:**
+```
+Client:
+	Tag:         v1.8.0
+	SHA:         abc123def456
+	Built:       2024-01-15T10:30:00Z
+	Go version:  go1.21.5
+	OS/Arch:     linux/amd64
+Server:
+	NODE:        10.5.0.2
+	Tag:         v1.8.0
+	SHA:         abc123def456
+	Built:       2024-01-15T10:30:00Z
+	Go version:  go1.21.5
+	OS/Arch:     linux/amd64
+	Enabled:     RBAC
+```
+
+---
+
+## Common Workflows
+
+### Rolling Node Upgrades
+
+```bash
+# Upgrade control plane nodes one at a time
+talosctl -n 10.5.0.2 upgrade --image ghcr.io/siderolabs/installer:v1.8.0 --wait
+talosctl -n 10.5.0.3 upgrade --image ghcr.io/siderolabs/installer:v1.8.0 --wait
+talosctl -n 10.5.0.4 upgrade --image ghcr.io/siderolabs/installer:v1.8.0 --wait
+
+# Upgrade worker nodes
+talosctl -n 10.5.0.5,10.5.0.6 upgrade --image ghcr.io/siderolabs/installer:v1.8.0
+```
+
+### Maintenance Mode Recovery
+
+```bash
+# Reset a node to maintenance mode
+talosctl -n 10.5.0.5 reset --insecure
+
+# Apply new configuration in maintenance mode
+talosctl -n 10.5.0.5 apply-config --insecure -f worker.yaml
+```
+
+### Staged Upgrades
+
+```bash
+# Stage upgrade on all nodes
+talosctl -n 10.5.0.2,10.5.0.3,10.5.0.4 upgrade \
+  --image ghcr.io/siderolabs/installer:v1.8.0 \
+  --stage
+
+# Reboot nodes during maintenance window
+talosctl -n 10.5.0.2 reboot --wait
+talosctl -n 10.5.0.3 reboot --wait
+talosctl -n 10.5.0.4 reboot --wait
+```
+
+## See Also
+
+- [CLI Overview](/cli/overview) - Installation and basic usage
+- [Cluster Commands](/cli/cluster-commands) - Cluster management
+- [Config Commands](/cli/config-commands) - Configuration management

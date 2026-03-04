@@ -1,0 +1,546 @@
+---
+title: QEMU/VM Deployment
+description: Deploy Talos Linux in local VMs using QEMU for full boot experience
+---
+
+Talos Linux can run in local QEMU virtual machines, providing a full boot experience similar to bare metal or cloud deployments. This is useful for testing boot processes, upgrades, and platform-specific features.
+
+## Overview
+
+The QEMU provisioner provides:
+
+- Full VM boot process (BIOS or UEFI)
+- PXE boot support for testing network boot
+- Multiple disk configurations (SATA, NVMe, virtio)
+- CNI-based networking
+- TPM emulation
+- DHCP/TFTP/DNS services
+- Load balancer for control plane HA
+
+<Note>
+  QEMU clusters provide the most production-like local environment but require more resources than Docker.
+</Note>
+
+## Prerequisites
+
+- QEMU installed (`qemu-system-x86_64` or `qemu-system-aarch64`)
+- Linux or macOS host
+- At least 8GB RAM (2GB per node minimum)
+- `talosctl` installed
+- CNI plugins (automatically downloaded)
+
+### Install QEMU
+
+<CodeGroup>
+```bash Linux (Ubuntu/Debian)
+sudo apt update
+sudo apt install qemu-system-x86 qemu-utils
+```
+
+```bash Linux (Fedora/RHEL)
+sudo dnf install qemu-system-x86 qemu-img
+```
+
+```bash macOS
+brew install qemu
+```
+</CodeGroup>
+
+## Quick Start
+
+Create a local QEMU cluster:
+
+```bash
+talosctl cluster create --provisioner qemu
+```
+
+This creates:
+- 1 control plane node (default)
+- VM network with DHCP and load balancer
+- State directory at `~/.talos/clusters/<cluster-name>`
+
+## Cluster Configuration
+
+### Multi-Node Cluster
+
+```bash
+talosctl cluster create \
+  --provisioner qemu \
+  --name my-cluster \
+  --controlplanes 3 \
+  --workers 2
+```
+
+### Resource Configuration
+
+```bash
+talosctl cluster create \
+  --provisioner qemu \
+  --controlplanes 3 \
+  --cpus 2 \
+  --memory 4096 \
+  --disk 20480
+```
+
+### Boot Options
+
+<CodeGroup>
+```bash UEFI Boot
+# Enable UEFI (default on arm64)
+talosctl cluster create \
+  --provisioner qemu \
+  --with-uefi
+```
+
+```bash BIOS Boot
+# Traditional BIOS boot (default on amd64)
+talosctl cluster create \
+  --provisioner qemu
+```
+
+```bash PXE Boot
+# Boot via network (PXE)
+talosctl cluster create \
+  --provisioner qemu \
+  --workers 1 \
+  --with-pxe
+```
+</CodeGroup>
+
+## QEMU Provisioner Architecture
+
+The QEMU provisioner creates a complete infrastructure:
+
+```go
+// From pkg/provision/providers/qemu/create.go
+func (p *provisioner) Create(ctx context.Context, request provision.ClusterRequest, opts ...provision.Option) (provision.Cluster, error) {
+    // 1. Create CNI network
+    p.CreateNetwork(ctx, state, request.Network, options)
+    
+    // 2. Create load balancer for control plane
+    p.CreateLoadBalancer(state, request)
+    
+    // 3. Create DNS server
+    p.CreateDNSd(state, request)
+    
+    // 4. Create control plane VMs
+    nodeInfo, _ := p.createNodes(ctx, state, request, request.Nodes.ControlPlaneNodes(), &options)
+    
+    // 5. Create DHCP server (for PXE)
+    p.CreateDHCPd(ctx, state, request)
+    
+    // 6. Create worker VMs
+    workerNodeInfo, _ := p.createNodes(ctx, state, request, request.Nodes.WorkerNodes(), &options)
+    
+    // 7. Create PXE VMs (if requested)
+    pxeNodeInfo, _ := p.createNodes(ctx, state, request, request.Nodes.PXENodes(), &options)
+}
+```
+
+## Boot Methods
+
+### Disk Boot (Default)
+
+Boot from disk image:
+
+```bash
+talosctl cluster create \
+  --provisioner qemu \
+  --disk-image-path /path/to/disk.raw
+```
+
+### ISO Boot
+
+Boot from ISO:
+
+```bash
+talosctl cluster create \
+  --provisioner qemu \
+  --iso-path /path/to/talos.iso
+```
+
+### PXE Network Boot
+
+The provisioner includes built-in PXE infrastructure:
+
+```go
+// From pkg/provision/request.go
+type NodeRequest struct {
+    PXEBooted        bool
+    TFTPServer       string
+    IPXEBootFilename string
+}
+```
+
+Create PXE boot cluster:
+
+```bash
+talosctl cluster create \
+  --provisioner qemu \
+  --controlplanes 1 \
+  --workers 0 \
+  --extra-boot-kernel-args talos.platform=metal
+```
+
+## Advanced Configuration
+
+### UEFI Options
+
+Configure UEFI boot:
+
+```bash
+talosctl cluster create \
+  --provisioner qemu \
+  --with-uefi \
+  --extra-uefi-search-paths /usr/share/OVMF
+```
+
+### TPM Emulation
+
+Enable TPM 2.0:
+
+```bash
+talosctl cluster create \
+  --provisioner qemu \
+  --with-tpm2
+```
+
+This requires `swtpm` package:
+
+```bash
+# Install swtpm
+sudo apt install swtpm swtpm-tools  # Ubuntu/Debian
+sudo dnf install swtpm swtpm-tools  # Fedora/RHEL
+```
+
+### Custom Disk Configuration
+
+Configure multiple disks:
+
+```yaml disk-config.yaml
+machine:
+  disks:
+    - device: /dev/vda
+      partitions:
+        - size: 1GB
+          mountpoint: /var/lib/etcd
+```
+
+### Network Configuration
+
+<CodeGroup>
+```bash Custom CIDR
+talosctl cluster create \
+  --provisioner qemu \
+  --cidr 192.168.100.0/24
+```
+
+```bash Custom MTU
+talosctl cluster create \
+  --provisioner qemu \
+  --mtu 9000
+```
+
+```bash Multiple Networks
+talosctl cluster create \
+  --provisioner qemu \
+  --cidr 10.5.0.0/24,fdae:41e4:649b:9303::/64
+```
+</CodeGroup>
+
+## Networking Details
+
+### CNI Network
+
+The QEMU provisioner uses CNI networking:
+
+```bash
+# CNI config directory (default)
+~/.talos/cni/
+```
+
+### Load Balancer
+
+Built-in load balancer for control plane:
+
+```go
+// From pkg/provision/providers/vm/loadbalancer.go
+type LoadBalancer struct {
+    Listener net.Listener
+    Backends []string
+}
+```
+
+Automatically proxies traffic to control plane nodes on port 6443.
+
+### DHCP Server
+
+For PXE boot support:
+
+```go
+// From pkg/provision/providers/vm/dhcpd.go
+type DHCPd struct {
+    Listener         *net.UDPConn
+    TFTPServer       string
+    IPXEBootFilename string
+}
+```
+
+### DNS Server
+
+Local DNS resolution:
+
+```go
+// From pkg/provision/providers/vm/dnsd.go
+type DNSd struct {
+    Listener *net.UDPConn
+    Nodes    map[string]netip.Addr
+}
+```
+
+## VM Configuration Options
+
+### CPU and Memory
+
+```bash
+talosctl cluster create \
+  --provisioner qemu \
+  --cpus 4 \
+  --memory 8192
+```
+
+### Disk Options
+
+<CodeGroup>
+```bash Single Disk
+talosctl cluster create \
+  --provisioner qemu \
+  --disk 20480
+```
+
+```bash Multiple Disks
+talosctl cluster create \
+  --provisioner qemu \
+  --user-disk /dev/vdb:10G \
+  --user-disk /dev/vdc:20G
+```
+
+```bash NVMe Disks
+talosctl cluster create \
+  --provisioner qemu \
+  --disk-driver nvme
+```
+</CodeGroup>
+
+### Architecture
+
+```bash
+# ARM64 VMs
+talosctl cluster create \
+  --provisioner qemu \
+  --arch arm64
+
+# AMD64 VMs (default)
+talosctl cluster create \
+  --provisioner qemu \
+  --arch amd64
+```
+
+## Testing Features
+
+### Bad RTC
+
+Test time-related issues:
+
+```bash
+talosctl cluster create \
+  --provisioner qemu \
+  --bad-rtc
+```
+
+This sets the RTC to a time in the past to test time sync.
+
+### IOMMU
+
+Enable IOMMU for testing:
+
+```bash
+talosctl cluster create \
+  --provisioner qemu \
+  --with-iommu
+```
+
+## Managing Clusters
+
+### List Clusters
+
+```bash
+talosctl cluster show --provisioner qemu
+```
+
+### Access Nodes
+
+```bash
+# Get cluster info
+talosctl cluster show
+
+# Access node
+talosctl -n 10.5.0.2 version
+```
+
+### Destroy Cluster
+
+```bash
+talosctl cluster destroy \
+  --provisioner qemu \
+  --name my-cluster
+```
+
+### Cluster State
+
+Cluster state is stored in:
+
+```
+~/.talos/clusters/<cluster-name>/
+├── controlplane-1/
+│   ├── disk.raw
+│   └── state.yaml
+├── worker-1/
+│   └── ...
+└── clusterstate.yaml
+```
+
+## Platform-Specific Features
+
+### Boot Order
+
+Control boot order:
+
+```go
+// From pkg/provision/request.go
+type NodeRequest struct {
+    // DefaultBootOrder overrides default boot order "cn" (disk, then network)
+    DefaultBootOrder string  // "cn" or "nc" (network first)
+}
+```
+
+### Kernel Arguments
+
+Add extra kernel args:
+
+```bash
+talosctl cluster create \
+  --provisioner qemu \
+  --extra-boot-kernel-args "talos.platform=metal console=ttyS0"
+```
+
+### Configuration Injection
+
+<CodeGroup>
+```bash HTTP Injection (Default)
+# Config served via HTTP
+talosctl cluster create --provisioner qemu
+```
+
+```bash ISO Injection
+# Embed config in ISO
+talosctl cluster create \
+  --provisioner qemu \
+  --iso-path talos.iso \
+  --config-patch '[{"op":"add","path":"/machine/install/image","value":"ghcr.io/siderolabs/installer:latest"}]'
+```
+</CodeGroup>
+
+## Troubleshooting
+
+### VM Console Access
+
+```bash
+# View VM console
+socat -,rawer,escape=0x1d unix-connect:~/.talos/clusters/<cluster-name>/controlplane-1/console.sock
+```
+
+### Check VM Process
+
+```bash
+ps aux | grep qemu
+```
+
+### Network Issues
+
+```bash
+# Check CNI network
+sudo ip link show
+sudo ip addr show talos0
+
+# Test connectivity
+ping 10.5.0.2
+```
+
+### Disk Issues
+
+```bash
+# Check disk image
+qemu-img info ~/.talos/clusters/<cluster-name>/controlplane-1/disk.raw
+```
+
+### Logs
+
+```bash
+# Cluster creation logs
+talosctl cluster create --provisioner qemu -v
+
+# Node logs
+talosctl -n 10.5.0.2 logs machined
+```
+
+## Performance Tuning
+
+### KVM Acceleration
+
+Enable hardware acceleration:
+
+```bash
+# Check KVM support
+lsmod | grep kvm
+
+# Verify KVM device
+ls -l /dev/kvm
+```
+
+QEMU automatically uses KVM when available.
+
+### CPU Pinning
+
+For better performance, consider CPU pinning in production-like tests.
+
+### Disk I/O
+
+Use native AIO for better performance:
+
+```bash
+# Uses virtio-blk with native AIO by default
+```
+
+## Differences from Docker
+
+| Feature | QEMU | Docker |
+|---------|------|--------|
+| Boot | Full BIOS/UEFI | Container start |
+| Kernel | Talos kernel | Host kernel |
+| Storage | Virtual disks | Volumes/Bind mounts |
+| Networking | CNI/Bridge | Docker network |
+| PXE Boot | Supported | Not applicable |
+| Resource overhead | Higher | Lower |
+| Production similarity | High | Medium |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Bare Metal" icon="server" href="/deployment/bare-metal">
+    Deploy to physical servers
+  </Card>
+  <Card title="Upgrades" icon="arrow-up" href="/operations/upgrades">
+    Test upgrade procedures
+  </Card>
+</CardGroup>

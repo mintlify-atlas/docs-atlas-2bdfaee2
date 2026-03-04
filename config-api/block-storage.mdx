@@ -1,0 +1,529 @@
+---
+title: Block Storage Configuration
+description: Block device and volume configuration for Talos Linux
+---
+
+Talos Linux provides sophisticated block storage configuration through dedicated document types. These replace the deprecated `machine.disks` and `machine.systemDiskEncryption` fields from v1alpha1.
+
+## UserVolumeConfig
+
+The `UserVolumeConfig` document defines user-managed volumes that are automatically provisioned and mounted under `/var/mnt/<name>`.
+
+### Document Structure
+
+```yaml
+kind: UserVolumeConfig
+apiVersion: v1alpha1
+metadata:
+  name: volume-name
+```
+
+### Volume Configuration
+
+<ParamField path="name" type="string" required>
+  Name of the volume (1-34 characters). Can contain lowercase/uppercase ASCII letters, digits, and hyphens.
+  
+  The partition label is automatically generated as `u-<name>`.
+</ParamField>
+
+<ParamField path="volumeType" type="string" default="partition">
+  Type of volume to create.
+  
+  **Available types:**
+  - `partition` - Create a partition on a disk (default)
+  - `disk` - Use an entire disk
+  - `directory` - Create a directory in the system partition
+  
+  ```yaml
+  volumeType: partition
+  ```
+</ParamField>
+
+### Provisioning Configuration
+
+<ParamField path="provisioning" type="object">
+  Describes how the volume is provisioned (not applicable for `directory` type).
+  
+  <Expandable title="Provisioning Options">
+    <ParamField path="provisioning.diskSelector" type="object" required>
+      Select which disk to use for provisioning.
+      
+      <Expandable title="Disk Selector">
+        <ParamField path="provisioning.diskSelector.match" type="string">
+          CEL expression to match disks. Use disk properties like `transport`, `size`, `model`, etc.
+          
+          ```yaml
+          provisioning:
+            diskSelector:
+              match: 'disk.transport == "nvme"'
+          ```
+          
+          ```yaml
+          provisioning:
+            diskSelector:
+              match: 'disk.size >= 500u * GB && disk.type == "ssd"'
+          ```
+        </ParamField>
+      </Expandable>
+    </ParamField>
+    
+    <ParamField path="provisioning.minSize" type="string">
+      Minimum size for the partition (supports units like GiB, GB).
+      
+      ```yaml
+      provisioning:
+        minSize: 10GiB
+      ```
+    </ParamField>
+    
+    <ParamField path="provisioning.maxSize" type="string">
+      Maximum size for the partition. If not specified, uses all available space.
+      
+      ```yaml
+      provisioning:
+        maxSize: 50GiB
+      ```
+    </ParamField>
+    
+    <ParamField path="provisioning.grow" type="boolean" default="false">
+      Automatically grow the partition to fill available space on subsequent boots.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Filesystem Configuration
+
+<ParamField path="filesystem" type="object">
+  Describes how the volume is formatted.
+  
+  <Expandable title="Filesystem Options">
+    <ParamField path="filesystem.type" type="string" default="xfs">
+      Filesystem type to create.
+      
+      **Available types:**
+      - `xfs` (default) - XFS filesystem
+      - `ext4` - ext4 filesystem
+      
+      ```yaml
+      filesystem:
+        type: xfs
+      ```
+    </ParamField>
+    
+    <ParamField path="filesystem.projectQuotaSupport" type="boolean">
+      Enable project quota support (XFS only).
+      
+      **Note:** Changing this may require a full remount.
+      
+      ```yaml
+      filesystem:
+        type: xfs
+        projectQuotaSupport: true
+      ```
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Encryption Configuration
+
+<ParamField path="encryption" type="object">
+  Describes how the volume is encrypted.
+  
+  <Expandable title="Encryption Options">
+    <ParamField path="encryption.provider" type="string" required>
+      Encryption provider to use.
+      
+      **Available providers:**
+      - `luks2` - LUKS2 encryption
+      
+      ```yaml
+      encryption:
+        provider: luks2
+      ```
+    </ParamField>
+    
+    <ParamField path="encryption.keys" type="array" required>
+      Encryption keys generation and storage methods. Multiple keys can be configured in different slots.
+      
+      <Expandable title="Key Configuration">
+        <ParamField path="encryption.keys[].slot" type="integer" required>
+          Key slot number for LUKS2 (0-7).
+        </ParamField>
+        
+        <ParamField path="encryption.keys[].static" type="object">
+          Static passphrase key stored in configuration.
+          
+          ```yaml
+          encryption:
+            provider: luks2
+            keys:
+              - slot: 0
+                static:
+                  passphrase: my-secret-passphrase
+          ```
+        </ParamField>
+        
+        <ParamField path="encryption.keys[].nodeID" type="object">
+          Deterministically generated key from node UUID and partition label.
+          
+          ```yaml
+          encryption:
+            keys:
+              - slot: 0
+                nodeID: {}
+          ```
+        </ParamField>
+        
+        <ParamField path="encryption.keys[].tpm" type="object">
+          TPM-based disk encryption.
+          
+          ```yaml
+          encryption:
+            keys:
+              - slot: 0
+                tpm:
+                  checkSecurebootStatusOnEnroll: true
+          ```
+          
+          <Expandable title="TPM Options">
+            <ParamField path="encryption.keys[].tpm.options" type="object">
+              TPM key protection options.
+              
+              <ParamField path="encryption.keys[].tpm.options.pcrs" type="array">
+                List of PCR indices to bind the key to. Defaults to PCR 7 if not set.
+                
+                ```yaml
+                tpm:
+                  options:
+                    pcrs: [7, 12]
+                ```
+              </ParamField>
+            </ParamField>
+            
+            <ParamField path="encryption.keys[].tpm.checkSecurebootStatusOnEnroll" type="boolean">
+              Verify Secure Boot is enabled during key enrollment.
+            </ParamField>
+          </Expandable>
+        </ParamField>
+        
+        <ParamField path="encryption.keys[].kms" type="object">
+          KMS-managed encryption key.
+          
+          ```yaml
+          encryption:
+            keys:
+              - slot: 0
+                kms:
+                  endpoint: https://kms.example.com:4443
+          ```
+        </ParamField>
+        
+        <ParamField path="encryption.keys[].lockToState" type="boolean">
+          Lock the encryption key to random salt in STATE partition. Prevents volume unlock if STATE is compromised. Recommended with TPM encryption.
+        </ParamField>
+      </Expandable>
+    </ParamField>
+    
+    <ParamField path="encryption.cipher" type="string">
+      Cipher to use for encryption (provider-dependent).
+      
+      **Available ciphers:**
+      - `aes-xts-plain64`
+      - `xchacha12,aes-adiantum-plain64`
+      - `xchacha20,aes-adiantum-plain64`
+      
+      ```yaml
+      encryption:
+        cipher: aes-xts-plain64
+      ```
+    </ParamField>
+    
+    <ParamField path="encryption.keySize" type="integer">
+      Encryption key length in bits.
+    </ParamField>
+    
+    <ParamField path="encryption.blockSize" type="integer">
+      Encryption sector size.
+      
+      ```yaml
+      encryption:
+        blockSize: 4096
+      ```
+    </ParamField>
+    
+    <ParamField path="encryption.options" type="array">
+      Additional `--perf` parameters for LUKS2.
+      
+      **Available options:**
+      - `no_read_workqueue`
+      - `no_write_workqueue`
+      - `same_cpu_crypt`
+      
+      ```yaml
+      encryption:
+        options:
+          - no_read_workqueue
+          - no_write_workqueue
+      ```
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Mount Configuration
+
+<ParamField path="mount" type="object">
+  Additional mount options for the volume.
+  
+  <Expandable title="Mount Options">
+    <ParamField path="mount.disableAccessTime" type="boolean">
+      Disable file access time updates (noatime).
+      
+      ```yaml
+      mount:
+        disableAccessTime: true
+      ```
+    </ParamField>
+    
+    <ParamField path="mount.secure" type="boolean" default="true">
+      Enable secure mount options (nosuid, nodev). Defaults to true for better security.
+      
+      ```yaml
+      mount:
+        secure: true
+      ```
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Complete Examples
+
+<CodeGroup>
+```yaml Partition Volume with TPM Encryption
+kind: UserVolumeConfig
+apiVersion: v1alpha1
+name: local-data
+volumeType: partition
+provisioning:
+  diskSelector:
+    match: 'disk.transport == "nvme"'
+  maxSize: 50GiB
+filesystem:
+  type: xfs
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      tpm: {}
+    - slot: 1
+      static:
+        passphrase: topsecret
+```
+
+```yaml Disk Volume
+kind: UserVolumeConfig
+apiVersion: v1alpha1
+name: local-data
+volumeType: disk
+provisioning:
+  diskSelector:
+    match: 'disk.transport == "nvme"'
+filesystem:
+  type: xfs
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      tpm: {}
+    - slot: 1
+      static:
+        passphrase: topsecret
+```
+
+```yaml Directory Volume
+kind: UserVolumeConfig
+apiVersion: v1alpha1
+name: local-data
+volumeType: directory
+```
+</CodeGroup>
+
+## ExistingVolumeConfig
+
+The `ExistingVolumeConfig` document mounts existing volumes that were created outside of Talos.
+
+```yaml
+kind: ExistingVolumeConfig
+apiVersion: v1alpha1
+name: data
+volumeLocator:
+  partitionLabel: DATA
+mountpoint: /var/mnt/data
+```
+
+## RawVolumeConfig
+
+The `RawVolumeConfig` document provides raw (unformatted) volume access.
+
+```yaml
+kind: RawVolumeConfig
+apiVersion: v1alpha1
+name: raw-storage
+volumeType: partition
+provisioning:
+  diskSelector:
+    match: 'disk.size >= 100u * GB'
+```
+
+## SwapVolumeConfig
+
+The `SwapVolumeConfig` document configures swap space.
+
+```yaml
+kind: SwapVolumeConfig
+apiVersion: v1alpha1
+provisioning:
+  diskSelector:
+    match: 'disk.transport == "nvme"'
+  minSize: 8GiB
+```
+
+## VolumeConfig
+
+The `VolumeConfig` document configures system volumes (EPHEMERAL, STATE, etc.).
+
+```yaml
+kind: VolumeConfig
+apiVersion: v1alpha1
+name: EPHEMERAL
+provisioning:
+  grow: true
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      tpm: {}
+```
+
+## Disk Selector Expressions
+
+Disk selectors use CEL (Common Expression Language) for flexible disk matching. Available disk properties:
+
+- `disk.size` - Disk size in bytes (use `* GB` or `* GiB` multipliers)
+- `disk.transport` - Transport type (`nvme`, `sata`, `usb`, etc.)
+- `disk.type` - Disk type (`ssd`, `hdd`)
+- `disk.model` - Disk model string
+- `disk.serial` - Disk serial number
+- `disk.wwid` - World-wide identifier
+- `disk.rotational` - Boolean indicating rotational media
+
+### Example Expressions
+
+```yaml
+# NVMe drives only
+match: 'disk.transport == "nvme"'
+
+# SSDs larger than 500GB
+match: 'disk.size >= 500u * GB && disk.type == "ssd"'
+
+# Non-rotational drives
+match: '!disk.rotational'
+
+# Specific model
+match: 'disk.model.contains("Samsung")'
+
+# Multiple conditions
+match: 'disk.transport == "nvme" && disk.size >= 1u * TB && disk.type == "ssd"'
+```
+
+## Encryption Key Management
+
+### Key Slot Strategy
+
+LUKS2 supports up to 8 key slots (0-7). Use multiple slots for key rotation and recovery:
+
+- **Slot 0**: Primary key (TPM-based for production)
+- **Slot 1**: Recovery key (static passphrase)
+- **Slot 2**: KMS-managed key (for centralized management)
+
+### TPM-Based Encryption
+
+TPM encryption binds the key to the machine's hardware and boot state:
+
+```yaml
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      tpm:
+        options:
+          pcrs: [7]  # Secure Boot state
+        checkSecurebootStatusOnEnroll: true
+    - slot: 1
+      static:
+        passphrase: recovery-key
+      lockToState: true
+```
+
+### KMS Integration
+
+Use external Key Management Service for centralized key management:
+
+```yaml
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      kms:
+        endpoint: https://kms.example.com:4443
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always Configure Recovery Keys">
+    Include at least one static passphrase key in addition to TPM keys for recovery scenarios.
+    
+    ```yaml
+    keys:
+      - slot: 0
+        tpm: {}
+      - slot: 1
+        static:
+          passphrase: secure-recovery-key
+    ```
+  </Accordion>
+  
+  <Accordion title="Use Appropriate Volume Types">
+    - Use `partition` for most cases
+    - Use `disk` when you need an entire dedicated disk
+    - Use `directory` for lightweight storage without partitioning
+  </Accordion>
+  
+  <Accordion title="Size Appropriately">
+    Set `maxSize` to prevent volumes from consuming all available space. Use `grow: true` when you want the volume to expand.
+  </Accordion>
+  
+  <Accordion title="Enable Lock to STATE">
+    For non-STATE volumes with TPM encryption, enable `lockToState` for additional security.
+  </Accordion>
+</AccordionGroup>
+
+## Migration from Deprecated Fields
+
+The following deprecated v1alpha1 fields are replaced by the new volume configuration documents:
+
+| Deprecated Field | New Document Type |
+|-----------------|-------------------|
+| `machine.disks` | `UserVolumeConfig` |
+| `machine.systemDiskEncryption` | `VolumeConfig` |
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Machine Configuration" icon="server" href="/config-api/machine-config">
+    See machine-level configuration options
+  </Card>
+  <Card title="Network Configuration" icon="network-wired" href="/config-api/network-config">
+    Configure network interfaces
+  </Card>
+</CardGroup>

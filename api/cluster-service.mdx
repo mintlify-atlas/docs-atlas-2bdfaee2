@@ -1,0 +1,494 @@
+---
+title: ClusterService API
+description: Complete reference for Talos ClusterService gRPC API methods
+---
+
+## Overview
+
+The ClusterService provides cluster-wide operations that span multiple nodes. Unlike MachineService which operates on individual nodes, ClusterService methods coordinate actions across the cluster.
+
+```protobuf
+service ClusterService {
+  rpc HealthCheck(HealthCheckRequest) returns (stream HealthCheckProgress);
+}
+```
+
+## Health Check
+
+### HealthCheck
+
+Performs a comprehensive health check across the entire cluster, validating that all components are functioning correctly.
+
+<ParamField path="wait_timeout" type="Duration">
+  Maximum time to wait for cluster to become healthy. If not specified, returns current status immediately.
+</ParamField>
+
+<ParamField path="cluster_info" type="ClusterInfo">
+  Optional cluster information to validate against
+</ParamField>
+
+#### ClusterInfo
+
+<ParamField path="control_plane_nodes" type="string[]">
+  List of control plane node addresses
+</ParamField>
+
+<ParamField path="worker_nodes" type="string[]">
+  List of worker node addresses
+</ParamField>
+
+<ParamField path="force_endpoint" type="string">
+  Override cluster endpoint for validation
+</ParamField>
+
+### Response
+
+The HealthCheck method returns a stream of progress messages as the health check proceeds.
+
+<ResponseField name="metadata" type="Metadata">
+  Standard response metadata with hostname
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Human-readable progress message describing the current check
+</ResponseField>
+
+### Health Check Stages
+
+The health check validates multiple aspects of the cluster:
+
+#### 1. Node Connectivity
+
+Verifies that all nodes are reachable via the Talos API:
+
+```
+Checking node connectivity...
+Node 10.0.0.1: connected
+Node 10.0.0.2: connected
+Node 10.0.0.3: connected
+```
+
+#### 2. Node Readiness
+
+Checks that all nodes report as ready:
+
+```
+Checking node readiness...
+Node 10.0.0.1: ready
+Node 10.0.0.2: ready
+Node 10.0.0.3: ready
+```
+
+#### 3. etcd Health
+
+Validates etcd cluster health on control plane nodes:
+
+```
+Checking etcd cluster health...
+Node 10.0.0.1: etcd member healthy
+Node 10.0.0.2: etcd member healthy
+Node 10.0.0.3: etcd member healthy
+etcd cluster has quorum
+```
+
+#### 4. Kubernetes API Server
+
+Verifies Kubernetes API server is accessible and responding:
+
+```
+Checking Kubernetes API server...
+Kubernetes API server is reachable
+All Kubernetes API server endpoints are healthy
+```
+
+#### 5. Control Plane Components
+
+Validates control plane components are running:
+
+```
+Checking control plane components...
+kube-apiserver: running
+kube-controller-manager: running
+kube-scheduler: running
+```
+
+#### 6. Node Health
+
+Verifies nodes are healthy from Kubernetes perspective:
+
+```
+Checking Kubernetes node health...
+Node worker-1: Ready
+Node worker-2: Ready
+Node control-plane-1: Ready
+```
+
+#### 7. Static Pods
+
+Checks that all static pods are running:
+
+```
+Checking static pods...
+kube-apiserver-control-plane-1: Running
+kube-controller-manager-control-plane-1: Running
+kube-scheduler-control-plane-1: Running
+etcd-control-plane-1: Running
+```
+
+### Usage Examples
+
+#### Basic Health Check
+
+Perform an immediate health check:
+
+```go
+import (
+    "context"
+    "fmt"
+    "io"
+    "github.com/siderolabs/talos/pkg/machinery/api/cluster"
+)
+
+stream, err := client.HealthCheck(ctx, &cluster.HealthCheckRequest{})
+if err != nil {
+    return err
+}
+
+for {
+    msg, err := stream.Recv()
+    if err == io.EOF {
+        break
+    }
+    if err != nil {
+        return err
+    }
+    
+    if msg.Metadata.Error != "" {
+        fmt.Printf("[%s] ERROR: %s\n", msg.Metadata.Hostname, msg.Metadata.Error)
+    } else {
+        fmt.Printf("[%s] %s\n", msg.Metadata.Hostname, msg.Message)
+    }
+}
+```
+
+#### Health Check with Timeout
+
+Wait up to 5 minutes for the cluster to become healthy:
+
+```go
+import (
+    "google.golang.org/protobuf/types/known/durationpb"
+    "time"
+)
+
+stream, err := client.HealthCheck(ctx, &cluster.HealthCheckRequest{
+    WaitTimeout: durationpb.New(5 * time.Minute),
+})
+```
+
+#### Health Check with Cluster Info
+
+Validate specific cluster topology:
+
+```go
+stream, err := client.HealthCheck(ctx, &cluster.HealthCheckRequest{
+    ClusterInfo: &cluster.ClusterInfo{
+        ControlPlaneNodes: []string{
+            "10.0.0.1",
+            "10.0.0.2",
+            "10.0.0.3",
+        },
+        WorkerNodes: []string{
+            "10.0.1.1",
+            "10.0.1.2",
+        },
+    },
+})
+```
+
+#### Using talosctl
+
+The `talosctl health` command wraps the HealthCheck RPC:
+
+```bash
+# Basic health check
+talosctl health
+
+# Wait for cluster to become healthy
+talosctl health --wait-timeout 10m
+
+# Check specific control plane nodes
+talosctl health --control-plane-nodes 10.0.0.1,10.0.0.2,10.0.0.3
+```
+
+### Error Handling
+
+Health check errors are reported in the metadata:
+
+```go
+for {
+    msg, err := stream.Recv()
+    if err == io.EOF {
+        break
+    }
+    if err != nil {
+        // gRPC level error
+        return fmt.Errorf("health check failed: %w", err)
+    }
+    
+    if msg.Metadata.Error != "" {
+        // Node-level error
+        fmt.Printf("Node %s: %s\n", msg.Metadata.Hostname, msg.Metadata.Error)
+    }
+    
+    if msg.Metadata.Status != nil && msg.Metadata.Status.Code != 0 {
+        // gRPC status error
+        fmt.Printf("Node %s: %s (code %d)\n",
+            msg.Metadata.Hostname,
+            msg.Metadata.Status.Message,
+            msg.Metadata.Status.Code)
+    }
+}
+```
+
+### Common Error Conditions
+
+#### Node Unreachable
+
+```
+[10.0.0.2] ERROR: rpc error: code = Unavailable desc = connection refused
+```
+
+**Resolution**: Check network connectivity, firewall rules, and that the Talos API is running.
+
+#### etcd Cluster Without Quorum
+
+```
+[10.0.0.1] etcd cluster lost quorum
+```
+
+**Resolution**: Ensure at least (N/2)+1 control plane nodes are running and healthy.
+
+#### Node Not Ready
+
+```
+[10.0.0.3] Node is not ready: KubeletNotReady
+```
+
+**Resolution**: Check kubelet logs and node status:
+
+```bash
+talosctl logs kubelet -n 10.0.0.3
+kubectl describe node <node-name>
+```
+
+#### API Server Unreachable
+
+```
+Kubernetes API server is not reachable: connection timeout
+```
+
+**Resolution**: Verify:
+- Control plane nodes are running
+- API server pods are healthy
+- Load balancer (if used) is functioning
+- Firewall rules allow port 6443
+
+### Wait Semantics
+
+When `wait_timeout` is specified, the health check will:
+
+1. Perform initial validation
+2. If unhealthy, retry checks every 5 seconds
+3. Continue until either:
+   - All checks pass (returns successfully)
+   - Timeout is reached (returns with error)
+   - Context is cancelled
+
+```go
+// Wait up to 10 minutes for cluster to be healthy
+ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+defer cancel()
+
+stream, err := client.HealthCheck(ctx, &cluster.HealthCheckRequest{
+    WaitTimeout: durationpb.New(10 * time.Minute),
+})
+
+// This will block until healthy or timeout
+for {
+    msg, err := stream.Recv()
+    if err == io.EOF {
+        fmt.Println("Cluster is healthy!")
+        break
+    }
+    if err != nil {
+        return fmt.Errorf("cluster did not become healthy: %w", err)
+    }
+    fmt.Println(msg.Message)
+}
+```
+
+## Use Cases
+
+### Pre-Upgrade Validation
+
+Before upgrading the cluster, validate everything is healthy:
+
+```bash
+talosctl health --wait-timeout 5m || exit 1
+talosctl upgrade --nodes 10.0.0.1 --image ghcr.io/siderolabs/installer:v1.7.0
+```
+
+### Post-Bootstrap Validation
+
+After bootstrapping a new cluster, wait for it to become healthy:
+
+```bash
+talosctl bootstrap -n 10.0.0.1
+talosctl health --wait-timeout 10m
+```
+
+### Continuous Monitoring
+
+Periodically check cluster health:
+
+```go
+func monitorClusterHealth(ctx context.Context, client *client.Client) {
+    ticker := time.NewTicker(1 * time.Minute)
+    defer ticker.Stop()
+    
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case <-ticker.C:
+            stream, err := client.HealthCheck(ctx, &cluster.HealthCheckRequest{})
+            if err != nil {
+                log.Printf("Health check failed: %v", err)
+                continue
+            }
+            
+            healthy := true
+            for {
+                msg, err := stream.Recv()
+                if err == io.EOF {
+                    break
+                }
+                if err != nil || msg.Metadata.Error != "" {
+                    healthy = false
+                    break
+                }
+            }
+            
+            if healthy {
+                log.Println("Cluster is healthy")
+            } else {
+                log.Println("Cluster has issues")
+                // Send alert, trigger remediation, etc.
+            }
+        }
+    }
+}
+```
+
+### CI/CD Integration
+
+Validate cluster health in CI/CD pipelines:
+
+```yaml
+# GitLab CI example
+deploy:
+  script:
+    - kubectl apply -f manifests/
+    - talosctl health --wait-timeout 5m
+  only:
+    - main
+```
+
+## Performance Considerations
+
+Health checks validate multiple cluster components and may take time to complete:
+
+- **Small cluster (3 nodes)**: ~5-10 seconds
+- **Medium cluster (10 nodes)**: ~15-30 seconds
+- **Large cluster (100+ nodes)**: ~1-3 minutes
+
+For large clusters, consider:
+
+1. **Increase timeout**: Allow more time for validation
+2. **Targeted checks**: Validate specific node subsets
+3. **Caching**: Don't run health checks too frequently
+
+## Best Practices
+
+### Always Set a Timeout
+
+Use appropriate timeouts based on cluster size:
+
+```go
+// Small cluster
+timeout := 2 * time.Minute
+
+// Large cluster
+timeout := 10 * time.Minute
+
+stream, err := client.HealthCheck(ctx, &cluster.HealthCheckRequest{
+    WaitTimeout: durationpb.New(timeout),
+})
+```
+
+### Handle Partial Failures
+
+Some nodes may be healthy while others are not:
+
+```go
+healthyNodes := []string{}
+unhealthyNodes := []string{}
+
+for {
+    msg, err := stream.Recv()
+    if err == io.EOF {
+        break
+    }
+    if err != nil {
+        return err
+    }
+    
+    if msg.Metadata.Error != "" {
+        unhealthyNodes = append(unhealthyNodes, msg.Metadata.Hostname)
+    } else {
+        healthyNodes = append(healthyNodes, msg.Metadata.Hostname)
+    }
+}
+
+if len(unhealthyNodes) > 0 {
+    fmt.Printf("Unhealthy nodes: %v\n", unhealthyNodes)
+}
+```
+
+### Use Context Cancellation
+
+Allow users to cancel long-running health checks:
+
+```go
+ctx, cancel := context.WithCancel(context.Background())
+
+// Handle Ctrl+C
+go func() {
+    sigCh := make(chan os.Signal, 1)
+    signal.Notify(sigCh, os.Interrupt)
+    <-sigCh
+    cancel()
+}()
+
+stream, err := client.HealthCheck(ctx, &cluster.HealthCheckRequest{
+    WaitTimeout: durationpb.New(10 * time.Minute),
+})
+```
+
+## See Also
+
+- [MachineService API](/api/machine-service) - Individual node operations
+- [InspectService API](/api/inspect-service) - Internal inspection
+- [Common Types](/api/common-types) - Shared data types
+- [API Overview](/api/overview) - API introduction

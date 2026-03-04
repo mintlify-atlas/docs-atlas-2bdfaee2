@@ -1,0 +1,478 @@
+---
+title: Cluster Configuration
+description: Cluster-wide configuration shared across all Talos nodes
+---
+
+Cluster configuration defines settings that are shared across all nodes in the cluster, including the control plane endpoint, cluster identity, Kubernetes component configuration, and networking.
+
+## Cluster Identity
+
+<ParamField path="cluster.id" type="string">
+  Globally unique identifier for this cluster (base64 encoded random 32 bytes). Generated automatically by `talosctl gen config`.
+</ParamField>
+
+<ParamField path="cluster.secret" type="string">
+  Shared secret of the cluster (base64 encoded random 32 bytes). This secret is shared among cluster members but should never be sent over the network.
+</ParamField>
+
+<ParamField path="cluster.clusterName" type="string">
+  The name of the cluster.
+</ParamField>
+
+```yaml
+cluster:
+  id: YWJjZGVmZ2hpamtsbW5vcA==
+  secret: cXJzdHV2d3h5ejEyMzQ1Ng==
+  clusterName: talos.local
+```
+
+## Control Plane
+
+<ParamField path="cluster.controlPlane.endpoint" type="string" required>
+  The canonical control plane endpoint, which can be an IP address or DNS hostname. Must be a single-valued endpoint and may optionally include a port number.
+  
+  <Warning>
+  This should be a stable, highly-available address (load balancer or VIP) that points to the control plane nodes.
+  </Warning>
+</ParamField>
+
+<ParamField path="cluster.controlPlane.localAPIServerPort" type="number" default="6443">
+  The port that the API server listens on internally. May differ from the port in the endpoint field.
+</ParamField>
+
+```yaml
+cluster:
+  controlPlane:
+    endpoint: https://192.168.1.100:6443
+    localAPIServerPort: 6443
+```
+
+## Cluster Network
+
+Define pod and service network CIDRs:
+
+<ParamField path="cluster.network" type="object">
+  Cluster-wide network configuration.
+</ParamField>
+
+```yaml
+cluster:
+  network:
+    cni:
+      name: flannel
+    dnsDomain: cluster.local
+    podSubnets:
+      - 10.244.0.0/16
+    serviceSubnets:
+      - 10.96.0.0/12
+```
+
+### Network Options
+
+<ParamField path="cluster.network.cni.name" type="string" default="flannel">
+  CNI plugin to use. Options: `flannel`, `custom`, `none`.
+</ParamField>
+
+<ParamField path="cluster.network.cni.urls" type="array">
+  URLs to CNI manifests to apply. Used when `name` is `custom`.
+</ParamField>
+
+<ParamField path="cluster.network.dnsDomain" type="string" default="cluster.local">
+  The domain used by Kubernetes DNS.
+</ParamField>
+
+<ParamField path="cluster.network.podSubnets" type="array" default='["10.244.0.0/16"]'>
+  The pod subnet CIDRs. Can include IPv4 and IPv6 for dual-stack clusters.
+</ParamField>
+
+<ParamField path="cluster.network.serviceSubnets" type="array" default='["10.96.0.0/12"]'>
+  The service subnet CIDRs. Can include IPv4 and IPv6 for dual-stack clusters.
+</ParamField>
+
+### Custom CNI Example
+
+```yaml
+cluster:
+  network:
+    cni:
+      name: custom
+      urls:
+        - https://docs.projectcalico.org/manifests/calico.yaml
+```
+
+## Kubernetes Components
+
+### API Server
+
+<ParamField path="cluster.apiServer" type="object">
+  API server configuration.
+</ParamField>
+
+```yaml
+cluster:
+  apiServer:
+    image: registry.k8s.io/kube-apiserver:v1.30.0
+    extraArgs:
+      feature-gates: ServerSideApply=true
+      audit-log-path: /var/log/audit.log
+    certSANs:
+      - 192.168.1.100
+      - api.example.com
+    auditPolicy:
+      apiVersion: audit.k8s.io/v1
+      kind: Policy
+      rules:
+        - level: Metadata
+```
+
+#### API Server Options
+
+<ParamField path="cluster.apiServer.image" type="string">
+  The container image used in the API server manifest.
+</ParamField>
+
+<ParamField path="cluster.apiServer.extraArgs" type="object">
+  Extra arguments to supply to the API server.
+</ParamField>
+
+<ParamField path="cluster.apiServer.extraVolumes" type="array">
+  Extra volumes to mount to the API server static pod.
+</ParamField>
+
+<ParamField path="cluster.apiServer.env" type="object">
+  Environment variables for the API server.
+</ParamField>
+
+<ParamField path="cluster.apiServer.certSANs" type="array">
+  Extra certificate subject alternative names for the API server's certificate.
+</ParamField>
+
+<ParamField path="cluster.apiServer.resources" type="object">
+  Configure API server resource requests and limits.
+</ParamField>
+
+### Controller Manager
+
+<ParamField path="cluster.controllerManager" type="object">
+  Controller manager configuration.
+</ParamField>
+
+```yaml
+cluster:
+  controllerManager:
+    image: registry.k8s.io/kube-controller-manager:v1.30.0
+    extraArgs:
+      node-cidr-mask-size: "24"
+      feature-gates: RotateKubeletServerCertificate=true
+```
+
+<ParamField path="cluster.controllerManager.image" type="string">
+  The container image used in the controller manager manifest.
+</ParamField>
+
+<ParamField path="cluster.controllerManager.extraArgs" type="object">
+  Extra arguments to supply to the controller manager.
+</ParamField>
+
+<ParamField path="cluster.controllerManager.resources" type="object">
+  Configure controller manager resource requests and limits.
+</ParamField>
+
+### Scheduler
+
+<ParamField path="cluster.scheduler" type="object">
+  Scheduler configuration.
+</ParamField>
+
+```yaml
+cluster:
+  scheduler:
+    image: registry.k8s.io/kube-scheduler:v1.30.0
+    extraArgs:
+      feature-gates: AllBeta=true
+```
+
+<ParamField path="cluster.scheduler.image" type="string">
+  The container image used in the scheduler manifest.
+</ParamField>
+
+<ParamField path="cluster.scheduler.extraArgs" type="object">
+  Extra arguments to supply to the scheduler.
+</ParamField>
+
+<ParamField path="cluster.scheduler.config" type="object">
+  Custom kube-scheduler configuration object.
+</ParamField>
+
+### Kube-proxy
+
+<ParamField path="cluster.proxy" type="object">
+  Kube-proxy configuration.
+</ParamField>
+
+```yaml
+cluster:
+  proxy:
+    disabled: false
+    image: registry.k8s.io/kube-proxy:v1.30.0
+    mode: ipvs
+    extraArgs:
+      proxy-mode: ipvs
+```
+
+<ParamField path="cluster.proxy.disabled" type="boolean" default="false">
+  Disable kube-proxy deployment on cluster bootstrap.
+</ParamField>
+
+<ParamField path="cluster.proxy.image" type="string">
+  The container image used in the kube-proxy manifest.
+</ParamField>
+
+<ParamField path="cluster.proxy.mode" type="string" default="iptables">
+  Proxy mode: `iptables` or `ipvs`.
+</ParamField>
+
+<ParamField path="cluster.proxy.extraArgs" type="object">
+  Extra arguments to supply to kube-proxy.
+</ParamField>
+
+## etcd
+
+<ParamField path="cluster.etcd" type="object">
+  etcd cluster configuration.
+</ParamField>
+
+```yaml
+cluster:
+  etcd:
+    image: gcr.io/etcd-development/etcd:v3.5.13
+    extraArgs:
+      election-timeout: "5000"
+      heartbeat-interval: "500"
+    advertisedSubnets:
+      - 10.0.0.0/8
+```
+
+### etcd Options
+
+<ParamField path="cluster.etcd.image" type="string">
+  The container image used to create the etcd service.
+</ParamField>
+
+<ParamField path="cluster.etcd.ca" type="object">
+  The root certificate authority of the PKI. Composed of base64 encoded `crt` and `key`.
+</ParamField>
+
+<ParamField path="cluster.etcd.extraArgs" type="object">
+  Extra arguments to supply to etcd.
+  
+  <Warning>
+  The following arguments are not allowed: `name`, `data-dir`, `initial-cluster-state`, `listen-peer-urls`, `listen-client-urls`, certificate-related arguments.
+  </Warning>
+</ParamField>
+
+<ParamField path="cluster.etcd.advertisedSubnets" type="array">
+  Subnet CIDRs to use for advertising etcd endpoints.
+</ParamField>
+
+## CoreDNS
+
+<ParamField path="cluster.coreDNS" type="object">
+  CoreDNS configuration.
+</ParamField>
+
+```yaml
+cluster:
+  coreDNS:
+    disabled: false
+    image: registry.k8s.io/coredns/coredns:v1.11.1
+```
+
+<ParamField path="cluster.coreDNS.disabled" type="boolean" default="false">
+  Disable CoreDNS deployment on cluster bootstrap.
+</ParamField>
+
+<ParamField path="cluster.coreDNS.image" type="string">
+  The CoreDNS container image to use.
+</ParamField>
+
+## Cluster Discovery
+
+<ParamField path="cluster.discovery" type="object">
+  Cluster member discovery configuration.
+</ParamField>
+
+```yaml
+cluster:
+  discovery:
+    enabled: true
+    registries:
+      service:
+        endpoint: https://discovery.talos.dev
+```
+
+<ParamField path="cluster.discovery.enabled" type="boolean" default="true">
+  Enable cluster member discovery.
+</ParamField>
+
+<ParamField path="cluster.discovery.registries.service.endpoint" type="string">
+  Discovery service endpoint.
+</ParamField>
+
+## Secrets and Certificates
+
+<ParamField path="cluster.token" type="string">
+  The bootstrap token used to join the cluster. Format: `<token-id>.<token-secret>`.
+</ParamField>
+
+<ParamField path="cluster.ca" type="object" required>
+  The base64 encoded root certificate authority used by Kubernetes.
+</ParamField>
+
+<ParamField path="cluster.aggregatorCA" type="object">
+  The base64 encoded aggregator certificate authority used by Kubernetes for front-proxy certificate generation.
+</ParamField>
+
+<ParamField path="cluster.serviceAccount" type="object">
+  The base64 encoded private key for service account token generation.
+</ParamField>
+
+```yaml
+cluster:
+  token: "abcdef.0123456789abcdef"
+  ca:
+    crt: LS0tLS1CRUdJTi...
+    key: LS0tLS1CRUdJTi...
+  aggregatorCA:
+    crt: LS0tLS1CRUdJTi...
+    key: LS0tLS1CRUdJTi...
+  serviceAccount:
+    key: LS0tLS1CRUdJTi...
+```
+
+## Encryption at Rest
+
+<ParamField path="cluster.aescbcEncryptionSecret" type="string">
+  A key used for encryption of secret data at rest. Enables encryption with AESCBC.
+</ParamField>
+
+<ParamField path="cluster.secretboxEncryptionSecret" type="string">
+  A key used for encryption of secret data at rest. Enables encryption with secretbox. Secretbox has precedence over AESCBC.
+</ParamField>
+
+```yaml
+cluster:
+  secretboxEncryptionSecret: z01mye6j16bspJYtTB/5SFX8j7Ph4JXxM2Xuu4vsBPM=
+```
+
+## Extra Manifests
+
+<ParamField path="cluster.extraManifests" type="array">
+  A list of URLs that point to additional Kubernetes manifests. These are automatically deployed as part of the bootstrap.
+</ParamField>
+
+<ParamField path="cluster.extraManifestHeaders" type="object">
+  A map of key-value pairs added as headers when fetching extra manifests.
+</ParamField>
+
+```yaml
+cluster:
+  extraManifests:
+    - https://raw.githubusercontent.com/example/manifests/app.yaml
+  extraManifestHeaders:
+    Authorization: "Bearer token123"
+```
+
+## Inline Manifests
+
+<ParamField path="cluster.inlineManifests" type="array">
+  A list of inline Kubernetes manifests. These are automatically deployed as part of the bootstrap.
+</ParamField>
+
+```yaml
+cluster:
+  inlineManifests:
+    - name: namespace-ci
+      contents: |
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: ci
+```
+
+## Admin Kubeconfig
+
+<ParamField path="cluster.adminKubeconfig" type="object">
+  Settings for admin kubeconfig generation.
+</ParamField>
+
+```yaml
+cluster:
+  adminKubeconfig:
+    certLifetime: 24h
+```
+
+<ParamField path="cluster.adminKubeconfig.certLifetime" type="duration" default="8760h">
+  Certificate lifetime for admin kubeconfig. Default is 1 year.
+</ParamField>
+
+## Allow Scheduling on Control Planes
+
+<ParamField path="cluster.allowSchedulingOnControlPlanes" type="boolean" default="false">
+  Allows running workload on control plane nodes.
+  
+  <Note>
+  Enabling this removes the `node-role.kubernetes.io/control-plane:NoSchedule` taint from control plane nodes.
+  </Note>
+</ParamField>
+
+```yaml
+cluster:
+  allowSchedulingOnControlPlanes: true
+```
+
+## Complete Example
+
+```yaml
+cluster:
+  id: YWJjZGVmZ2hpamtsbW5vcA==
+  secret: cXJzdHV2d3h5ejEyMzQ1Ng==
+  clusterName: production
+  controlPlane:
+    endpoint: https://api.cluster.example.com:6443
+    localAPIServerPort: 6443
+  network:
+    cni:
+      name: custom
+      urls:
+        - https://raw.githubusercontent.com/cilium/cilium/v1.15.0/install/kubernetes/quick-install.yaml
+    dnsDomain: cluster.local
+    podSubnets:
+      - 10.244.0.0/16
+    serviceSubnets:
+      - 10.96.0.0/12
+  token: abcdef.0123456789abcdef
+  ca:
+    crt: LS0tLS1CRUdJTi...
+    key: LS0tLS1CRUdJTi...
+  apiServer:
+    image: registry.k8s.io/kube-apiserver:v1.30.0
+    extraArgs:
+      feature-gates: ServerSideApply=true
+    certSANs:
+      - api.cluster.example.com
+      - 192.168.1.100
+  controllerManager:
+    image: registry.k8s.io/kube-controller-manager:v1.30.0
+  scheduler:
+    image: registry.k8s.io/kube-scheduler:v1.30.0
+  etcd:
+    image: gcr.io/etcd-development/etcd:v3.5.13
+    extraArgs:
+      election-timeout: "5000"
+  coreDNS:
+    image: registry.k8s.io/coredns/coredns:v1.11.1
+  discovery:
+    enabled: true
+  allowSchedulingOnControlPlanes: false
+```

@@ -1,0 +1,191 @@
+---
+title: CLI Overview
+description: Introduction to talosctl, the CLI tool for managing Talos Linux clusters
+---
+
+## Introduction
+
+`talosctl` is the command-line interface (CLI) for managing Talos Linux clusters. It provides comprehensive control over cluster operations, node management, and configuration tasks.
+
+## Installation
+
+### Using Package Managers
+
+**macOS (Homebrew)**
+```bash
+brew install siderolabs/tap/talosctl
+```
+
+**Linux (curl)**
+```bash
+curl -sL https://talos.dev/install | sh
+```
+
+### Manual Installation
+
+Download the binary for your platform from the [releases page](https://github.com/siderolabs/talos/releases):
+
+```bash
+# Linux
+curl -Lo /usr/local/bin/talosctl https://github.com/siderolabs/talos/releases/latest/download/talosctl-linux-amd64
+chmod +x /usr/local/bin/talosctl
+
+# macOS
+curl -Lo /usr/local/bin/talosctl https://github.com/siderolabs/talos/releases/latest/download/talosctl-darwin-amd64
+chmod +x /usr/local/bin/talosctl
+```
+
+## Configuration
+
+### Talosconfig File
+
+`talosctl` uses a configuration file (talosconfig) to connect to Talos clusters. By default, it looks for the configuration in:
+
+1. `$TALOSCONFIG` environment variable
+2. `$HOME/.talos/config`
+3. `/var/run/secrets/talos.dev/config` (service account mount path)
+
+### Configuration Structure
+
+The talosconfig file contains:
+- **Contexts**: Named cluster configurations
+- **Endpoints**: API endpoints to connect to
+- **Nodes**: Target nodes for operations
+- **Certificates**: Authentication credentials (CA, client cert, client key)
+
+## Global Flags
+
+These flags are available for most talosctl commands:
+
+<ParamField path="--talosconfig" type="string">
+  Path to the Talos configuration file. Defaults to `$TALOSCONFIG` or `~/.talos/config`
+</ParamField>
+
+<ParamField path="--nodes" type="string[]">
+  Target nodes for the operation. Can be specified multiple times: `-n node1 -n node2`
+</ParamField>
+
+<ParamField path="--endpoints" type="string[]">
+  Override endpoints in the Talos configuration. Can be specified multiple times: `-e endpoint1 -e endpoint2`
+</ParamField>
+
+<ParamField path="--context" type="string">
+  Context to use from the talosconfig file
+</ParamField>
+
+<ParamField path="--cluster" type="string">
+  Cluster to connect to when using a proxy endpoint
+</ParamField>
+
+## Command Groups
+
+### Cluster Management Commands
+
+Operations for creating and managing local Talos clusters:
+- `cluster create` - Create a local cluster
+- `cluster destroy` - Destroy a local cluster
+- `cluster show` - Show cluster details
+
+### Node Operation Commands
+
+Commands for managing running Talos nodes:
+- `reboot` - Reboot a node
+- `shutdown` - Shutdown a node
+- `upgrade` - Upgrade Talos on a node
+- `reset` - Reset a node to factory defaults
+- `bootstrap` - Bootstrap etcd cluster
+
+### Configuration Commands
+
+Commands for managing machine configurations:
+- `gen config` - Generate configuration files
+- `apply-config` - Apply configuration to nodes
+- `config` - Manage talosconfig file
+- `edit` - Edit machine configuration
+- `patch` - Patch machine configuration
+
+### Diagnostic Commands
+
+Commands for troubleshooting and monitoring:
+- `dashboard` - Interactive cluster dashboard
+- `health` - Check cluster health
+- `logs` - Stream service logs
+- `dmesg` - View kernel messages
+- `version` - Print version information
+
+## Examples
+
+### Basic Usage
+
+**Check version**
+```bash
+talosctl version
+```
+
+**View cluster health**
+```bash
+talosctl health --control-plane-nodes 10.5.0.2,10.5.0.3 --worker-nodes 10.5.0.4
+```
+
+**Reboot a node**
+```bash
+talosctl reboot -n 10.5.0.2
+```
+
+### Configuration Management
+
+**Generate configuration**
+```bash
+talosctl gen config my-cluster https://10.5.0.1:6443
+```
+
+**Apply configuration**
+```bash
+talosctl apply-config -n 10.5.0.2 -f controlplane.yaml
+```
+
+### Working with Multiple Contexts
+
+**List contexts**
+```bash
+talosctl config contexts
+```
+
+**Switch context**
+```bash
+talosctl config context my-cluster
+```
+
+**Set nodes for current context**
+```bash
+talosctl config node 10.5.0.2 10.5.0.3
+```
+
+## Shell Completion
+
+Enable shell completion for talosctl:
+
+**Bash**
+```bash
+source <(talosctl completion bash)
+echo "source <(talosctl completion bash)" >> ~/.bashrc
+```
+
+**Zsh**
+```bash
+source <(talosctl completion zsh)
+echo "source <(talosctl completion zsh)" >> ~/.zshrc
+```
+
+**Fish**
+```bash
+talosctl completion fish | source
+talosctl completion fish > ~/.config/fish/completions/talosctl.fish
+```
+
+## Next Steps
+
+- [Main Command Reference](/cli/talosctl) - Complete reference for the talosctl command
+- [Cluster Commands](/cli/cluster-commands) - Learn about cluster management
+- [Node Commands](/cli/node-commands) - Explore node operations
+- [Config Commands](/cli/config-commands) - Manage configurations

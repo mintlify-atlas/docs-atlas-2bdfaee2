@@ -1,122 +1,128 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Talos Linux",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#f46721",
+    "light": "#e53a47",
+    "dark": "#f46721"
   },
-  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "https://media.brand.dev/6bdab747-c963-45c0-8f42-44bbd5ef5075.svg",
+    "dark": "https://media.brand.dev/6bdab747-c963-45c0-8f42-44bbd5ef5075.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/siderolabs/talos"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/siderolabs/talos"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "installation"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Architecture",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "architecture/overview",
+              "architecture/components",
+              "architecture/security-model",
+              "architecture/networking"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Installation & Deployment",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "deployment/platforms",
+              "deployment/bare-metal",
+              "deployment/aws",
+              "deployment/gcp",
+              "deployment/azure",
+              "deployment/docker",
+              "deployment/kubernetes-in-docker"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Configuration",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "configuration/overview",
+              "configuration/machine-config",
+              "configuration/cluster-config",
+              "configuration/network-config",
+              "configuration/storage-config",
+              "configuration/extensions"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/cluster-management",
+              "operations/upgrades",
+              "operations/etcd-management",
+              "operations/troubleshooting",
+              "operations/disaster-recovery"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "security/overview",
+              "security/certificates",
+              "security/authentication",
+              "security/hardening"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "CLI Reference",
             "pages": [
-              "api-reference/introduction"
+              "cli/overview",
+              "cli/talosctl",
+              "cli/cluster-commands",
+              "cli/node-commands",
+              "cli/config-commands"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "gRPC API",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/overview",
+              "api/machine-service",
+              "api/cluster-service",
+              "api/inspect-service",
+              "api/common-types"
+            ]
+          },
+          {
+            "group": "Configuration API",
+            "pages": [
+              "config-api/overview",
+              "config-api/machine-config",
+              "config-api/cluster-config",
+              "config-api/network-config",
+              "config-api/block-storage"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

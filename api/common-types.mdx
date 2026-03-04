@@ -1,0 +1,656 @@
+---
+title: Common Types
+description: Shared data types and structures used across Talos gRPC APIs
+---
+
+## Overview
+
+The Talos API uses several common types shared across all services. These types are defined in the `common` package and provide consistent data structures for metadata, errors, and data transfer.
+
+```protobuf
+package common;
+```
+
+## Metadata
+
+Every response message includes metadata identifying the responding node and any errors.
+
+```protobuf
+message Metadata {
+  string hostname = 1;
+  string error = 2;
+  google.rpc.Status status = 3;
+}
+```
+
+<ParamField path="hostname" type="string">
+  Hostname of the node that generated this response. Injected by the proxy when targeting multiple nodes.
+</ParamField>
+
+<ParamField path="error" type="string">
+  Human-readable error message if the request failed. Empty string indicates success.
+</ParamField>
+
+<ParamField path="status" type="google.rpc.Status">
+  gRPC status code and details if the request failed. Contains:
+  - `code`: gRPC status code (int32)
+  - `message`: Error message
+  - `details`: Additional error details
+</ParamField>
+
+### Example
+
+```json
+{
+  "metadata": {
+    "hostname": "worker-1",
+    "error": "",
+    "status": null
+  }
+}
+```
+
+**With error:**
+
+```json
+{
+  "metadata": {
+    "hostname": "worker-2",
+    "error": "service kubelet is not running",
+    "status": {
+      "code": 5,
+      "message": "not found"
+    }
+  }
+}
+```
+
+## Error Types
+
+### Error
+
+Represents a Talos-specific error with additional context.
+
+```protobuf
+message Error {
+  Code code = 1;
+  string message = 2;
+  repeated google.protobuf.Any details = 3;
+}
+```
+
+<ParamField path="code" type="Code">
+  Talos error code (see below)
+</ParamField>
+
+<ParamField path="message" type="string">
+  Human-readable error message
+</ParamField>
+
+<ParamField path="details" type="Any[]">
+  Additional error details (type-specific)
+</ParamField>
+
+### Error Codes
+
+```protobuf
+enum Code {
+  FATAL = 0;
+  LOCKED = 1;
+  CANCELED = 2;
+}
+```
+
+<ParamField path="FATAL" type="0">
+  Fatal error, operation cannot be retried
+</ParamField>
+
+<ParamField path="LOCKED" type="1">
+  Resource is locked, retry later
+</ParamField>
+
+<ParamField path="CANCELED" type="2">
+  Operation was canceled
+</ParamField>
+
+## Data Transfer
+
+### Data
+
+Used for streaming binary data (files, logs, etc.).
+
+```protobuf
+message Data {
+  Metadata metadata = 1;
+  bytes bytes = 2;
+}
+```
+
+<ParamField path="metadata" type="Metadata">
+  Standard metadata
+</ParamField>
+
+<ParamField path="bytes" type="bytes">
+  Chunk of binary data
+</ParamField>
+
+**Usage example:**
+
+```go
+// Read file from node
+stream, err := client.Read(ctx, &machine.ReadRequest{
+    Path: "/etc/os-release",
+})
+if err != nil {
+    return err
+}
+
+var content []byte
+for {
+    data, err := stream.Recv()
+    if err == io.EOF {
+        break
+    }
+    if err != nil {
+        return err
+    }
+    content = append(content, data.Bytes...)
+}
+
+fmt.Println(string(content))
+```
+
+### DataResponse
+
+Wraps multiple Data messages in a unary response.
+
+```protobuf
+message DataResponse {
+  repeated Data messages = 1;
+}
+```
+
+### Empty
+
+Empty response with metadata.
+
+```protobuf
+message Empty {
+  Metadata metadata = 1;
+}
+```
+
+### EmptyResponse
+
+Wraps multiple Empty messages.
+
+```protobuf
+message EmptyResponse {
+  repeated Empty messages = 1;
+}
+```
+
+## Container Types
+
+### ContainerDriver
+
+Specifies which container runtime to use.
+
+```protobuf
+enum ContainerDriver {
+  CONTAINERD = 0;
+  CRI = 1;
+}
+```
+
+<ParamField path="CONTAINERD" type="0">
+  Use containerd directly (system containers)
+</ParamField>
+
+<ParamField path="CRI" type="1">
+  Use CRI interface (Kubernetes containers)
+</ParamField>
+
+**Usage:**
+
+```go
+// List Kubernetes containers
+client.Containers(ctx, &machine.ContainersRequest{
+    Namespace: "k8s.io",
+    Driver:    common.ContainerDriver_CRI,
+})
+
+// List system containers
+client.Containers(ctx, &machine.ContainersRequest{
+    Namespace: "system",
+    Driver:    common.ContainerDriver_CONTAINERD,
+})
+```
+
+### ContainerdNamespace
+
+Containerd namespace for container operations.
+
+```protobuf
+enum ContainerdNamespace {
+  NS_UNKNOWN = 0;
+  NS_SYSTEM = 1;
+  NS_CRI = 2;
+}
+```
+
+<ParamField path="NS_UNKNOWN" type="0">
+  Unknown/unspecified namespace
+</ParamField>
+
+<ParamField path="NS_SYSTEM" type="1">
+  System namespace (Talos services)
+</ParamField>
+
+<ParamField path="NS_CRI" type="2">
+  CRI namespace (Kubernetes pods)
+</ParamField>
+
+### ContainerdInstance
+
+Specifies a containerd instance.
+
+```protobuf
+message ContainerdInstance {
+  ContainerDriver driver = 1;
+  ContainerdNamespace namespace = 2;
+}
+```
+
+## Network Types
+
+### NetIP
+
+Represents an IP address.
+
+```protobuf
+message NetIP {
+  bytes ip = 1;
+}
+```
+
+<ParamField path="ip" type="bytes">
+  IP address in network byte order (4 bytes for IPv4, 16 bytes for IPv6)
+</ParamField>
+
+**Example:**
+
+```go
+// Create NetIP from string
+ip := net.ParseIP("10.0.0.1")
+netIP := &common.NetIP{
+    Ip: ip,
+}
+
+// Convert back to string
+ipAddr := net.IP(netIP.Ip).String() // "10.0.0.1"
+```
+
+### NetIPPort
+
+Represents an IP address and port.
+
+```protobuf
+message NetIPPort {
+  bytes ip = 1;
+  int32 port = 2;
+}
+```
+
+<ParamField path="ip" type="bytes">
+  IP address in network byte order
+</ParamField>
+
+<ParamField path="port" type="int32">
+  Port number (1-65535)
+</ParamField>
+
+**Example:**
+
+```go
+endpoint := &common.NetIPPort{
+    Ip:   net.ParseIP("10.0.0.1"),
+    Port: 6443,
+}
+// Represents: 10.0.0.1:6443
+```
+
+### NetIPPrefix
+
+Represents an IP address with CIDR prefix.
+
+```protobuf
+message NetIPPrefix {
+  bytes ip = 1;
+  int32 prefix_length = 2;
+}
+```
+
+<ParamField path="ip" type="bytes">
+  Network address in network byte order
+</ParamField>
+
+<ParamField path="prefix_length" type="int32">
+  CIDR prefix length (0-32 for IPv4, 0-128 for IPv6)
+</ParamField>
+
+**Example:**
+
+```go
+// Represents 10.0.0.0/24
+cidr := &common.NetIPPrefix{
+    Ip:           net.ParseIP("10.0.0.0"),
+    PrefixLength: 24,
+}
+
+// Represents 2001:db8::/32
+cidrV6 := &common.NetIPPrefix{
+    Ip:           net.ParseIP("2001:db8::"),
+    PrefixLength: 32,
+}
+```
+
+## Cryptographic Types
+
+### PEMEncodedCertificateAndKey
+
+PEM-encoded certificate and private key pair.
+
+```protobuf
+message PEMEncodedCertificateAndKey {
+  bytes crt = 1;
+  bytes key = 2;
+}
+```
+
+<ParamField path="crt" type="bytes">
+  PEM-encoded X.509 certificate
+</ParamField>
+
+<ParamField path="key" type="bytes">
+  PEM-encoded private key (RSA, ECDSA, or Ed25519)
+</ParamField>
+
+**Example:**
+
+```go
+certPair := &common.PEMEncodedCertificateAndKey{
+    Crt: []byte(`-----BEGIN CERTIFICATE-----
+MIIC...
+-----END CERTIFICATE-----`),
+    Key: []byte(`-----BEGIN PRIVATE KEY-----
+MIIE...
+-----END PRIVATE KEY-----`),
+}
+```
+
+### PEMEncodedCertificate
+
+PEM-encoded certificate only.
+
+```protobuf
+message PEMEncodedCertificate {
+  bytes crt = 1;
+}
+```
+
+<ParamField path="crt" type="bytes">
+  PEM-encoded X.509 certificate
+</ParamField>
+
+### PEMEncodedKey
+
+PEM-encoded private key only.
+
+```protobuf
+message PEMEncodedKey {
+  bytes key = 1;
+}
+```
+
+<ParamField path="key" type="bytes">
+  PEM-encoded private key
+</ParamField>
+
+## URL Type
+
+### URL
+
+Represents a URL.
+
+```protobuf
+message URL {
+  string full_path = 1;
+}
+```
+
+<ParamField path="full_path" type="string">
+  Complete URL including scheme, host, path, and query parameters
+</ParamField>
+
+**Example:**
+
+```go
+url := &common.URL{
+    FullPath: "https://github.com/siderolabs/talos/releases/download/v1.7.0/talos-amd64.tar.gz",
+}
+```
+
+## Deprecation Annotations
+
+The common package defines custom options for deprecation tracking:
+
+```protobuf
+extend google.protobuf.MessageOptions {
+  string remove_deprecated_message = 93117;
+}
+
+extend google.protobuf.FieldOptions {
+  string remove_deprecated_field = 93117;
+}
+
+extend google.protobuf.EnumOptions {
+  string remove_deprecated_enum = 93117;
+}
+
+extend google.protobuf.EnumValueOptions {
+  string remove_deprecated_enum_value = 93117;
+}
+
+extend google.protobuf.MethodOptions {
+  string remove_deprecated_method = 93117;
+}
+
+extend google.protobuf.ServiceOptions {
+  string remove_deprecated_service = 93117;
+}
+```
+
+These annotations indicate which Talos version will remove deprecated API elements.
+
+**Example:**
+
+```protobuf
+rpc ImageList(ImageListRequest) returns (stream ImageListResponse) {
+  option (common.remove_deprecated_method) = "v1.18";
+  option deprecated = true;
+}
+```
+
+This indicates `ImageList` will be removed in Talos v1.18.
+
+## Response Patterns
+
+### Single-Node Responses
+
+When targeting a single node, responses contain one message:
+
+```go
+resp, err := client.Version(ctx)
+if err != nil {
+    return err
+}
+
+if len(resp.Messages) != 1 {
+    return fmt.Errorf("unexpected response")
+}
+
+msg := resp.Messages[0]
+if msg.Metadata.Error != "" {
+    return fmt.Errorf("node error: %s", msg.Metadata.Error)
+}
+
+fmt.Printf("Version: %s\n", msg.Version.Tag)
+```
+
+### Multi-Node Responses
+
+When targeting multiple nodes, responses contain multiple messages:
+
+```go
+resp, err := client.Version(ctx)
+if err != nil {
+    return err
+}
+
+for _, msg := range resp.Messages {
+    if msg.Metadata.Error != "" {
+        fmt.Printf("%s: ERROR: %s\n",
+            msg.Metadata.Hostname,
+            msg.Metadata.Error,
+        )
+        continue
+    }
+    
+    fmt.Printf("%s: Talos %s\n",
+        msg.Metadata.Hostname,
+        msg.Version.Tag,
+    )
+}
+```
+
+### Streaming Responses
+
+Streaming responses send multiple messages over time:
+
+```go
+stream, err := client.Logs(ctx, &machine.LogsRequest{
+    Namespace: "system",
+    Id:        "kubelet",
+    Follow:    true,
+})
+if err != nil {
+    return err
+}
+
+for {
+    data, err := stream.Recv()
+    if err == io.EOF {
+        break
+    }
+    if err != nil {
+        return err
+    }
+    
+    if data.Metadata.Error != "" {
+        return fmt.Errorf("%s: %s",
+            data.Metadata.Hostname,
+            data.Metadata.Error,
+        )
+    }
+    
+    fmt.Print(string(data.Bytes))
+}
+```
+
+## Best Practices
+
+### Always Check Metadata
+
+Never assume a response succeeded. Always check metadata:
+
+```go
+// Bad
+resp, _ := client.Version(ctx)
+version := resp.Messages[0].Version.Tag
+
+// Good
+resp, err := client.Version(ctx)
+if err != nil {
+    return err
+}
+
+for _, msg := range resp.Messages {
+    if msg.Metadata.Error != "" {
+        log.Printf("%s failed: %s",
+            msg.Metadata.Hostname,
+            msg.Metadata.Error,
+        )
+        continue
+    }
+    // Use msg.Version...
+}
+```
+
+### Handle Partial Failures
+
+In multi-node scenarios, some nodes may succeed while others fail:
+
+```go
+successful := 0
+failed := 0
+
+for _, msg := range resp.Messages {
+    if msg.Metadata.Error != "" {
+        failed++
+        continue
+    }
+    successful++
+}
+
+if failed > 0 {
+    log.Printf("Partial failure: %d succeeded, %d failed", successful, failed)
+}
+```
+
+### Use Type-Safe Helpers
+
+Create helper functions for common conversions:
+
+```go
+func NetIPFromString(s string) (*common.NetIP, error) {
+    ip := net.ParseIP(s)
+    if ip == nil {
+        return nil, fmt.Errorf("invalid IP: %s", s)
+    }
+    return &common.NetIP{Ip: ip}, nil
+}
+
+func NetIPToString(n *common.NetIP) string {
+    return net.IP(n.Ip).String()
+}
+
+func NetIPPrefixFromString(s string) (*common.NetIPPrefix, error) {
+    ip, ipNet, err := net.ParseCIDR(s)
+    if err != nil {
+        return nil, err
+    }
+    prefixLen, _ := ipNet.Mask.Size()
+    return &common.NetIPPrefix{
+        Ip:           ip,
+        PrefixLength: int32(prefixLen),
+    }, nil
+}
+```
+
+## See Also
+
+- [MachineService API](/api/machine-service)
+- [ClusterService API](/api/cluster-service)
+- [InspectService API](/api/inspect-service)
+- [API Overview](/api/overview)

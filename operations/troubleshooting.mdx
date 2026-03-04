@@ -1,0 +1,480 @@
+---
+title: Troubleshooting
+description: Common issues, debugging techniques, and troubleshooting procedures for Talos Linux clusters.
+---
+
+This guide covers common issues you may encounter with Talos Linux and provides systematic approaches to diagnosing and resolving problems.
+
+## General Debugging Approach
+
+When troubleshooting Talos clusters, follow this systematic approach:
+
+<Steps>
+  <Step title="Check cluster health">
+    Start with a high-level health check:
+
+    ```bash
+    talosctl health --control-plane-nodes 10.0.0.2,10.0.0.3,10.0.0.4
+    kubectl get nodes
+    kubectl get pods -A
+    ```
+  </Step>
+
+  <Step title="Identify the affected component">
+    Determine which layer is experiencing issues:
+    - Node/OS level (Talos)
+    - etcd cluster
+    - Kubernetes control plane
+    - Application/workload level
+  </Step>
+
+  <Step title="Gather logs and state">
+    Collect relevant diagnostic information using talosctl commands.
+  </Step>
+
+  <Step title="Analyze and resolve">
+    Use the specific troubleshooting sections below based on your findings.
+  </Step>
+</Steps>
+
+## Accessing Logs
+
+### Service Logs
+
+View logs for system services:
+
+```bash
+# Kubelet logs
+talosctl --nodes 10.0.0.2 logs kubelet
+
+# etcd logs
+talosctl --nodes 10.0.0.2 logs etcd
+
+# Follow logs in real-time
+talosctl --nodes 10.0.0.2 logs kubelet --follow
+
+# View last 100 lines
+talosctl --nodes 10.0.0.2 logs kubelet --tail 100
+```
+
+### Kernel Logs
+
+View kernel messages and system events:
+
+```bash
+# View kernel logs
+talosctl --nodes 10.0.0.2 dmesg
+
+# Follow kernel logs
+talosctl --nodes 10.0.0.2 dmesg --follow
+
+# View only recent messages
+talosctl --nodes 10.0.0.2 dmesg --tail
+```
+
+### Container Logs
+
+View logs for Kubernetes containers:
+
+```bash
+# System containers (containerd namespace)
+talosctl --nodes 10.0.0.2 logs etcd
+talosctl --nodes 10.0.0.2 logs kubelet
+
+# Kubernetes containers (CRI namespace)
+talosctl --nodes 10.0.0.2 logs --kubernetes kube-apiserver-controlplane-1
+
+# Or use kubectl
+kubectl logs -n kube-system kube-apiserver-controlplane-1
+```
+
+## Node Issues
+
+### Node Not Joining Cluster
+
+**Symptoms**: New node doesn't appear in `kubectl get nodes`
+
+**Diagnosis**:
+
+```bash
+# Check node connectivity
+ping 10.0.0.5
+
+# Check Talos services
+talosctl --nodes 10.0.0.5 services
+
+# Check kubelet logs
+talosctl --nodes 10.0.0.5 logs kubelet
+
+# Check if node can reach API server
+talosctl --nodes 10.0.0.5 get member
+```
+
+**Common causes and solutions**:
+
+1. **Network connectivity**: Verify network configuration
+   ```bash
+   talosctl --nodes 10.0.0.5 get addresses
+   talosctl --nodes 10.0.0.5 get routes
+   ```
+
+2. **Incorrect configuration**: Verify control plane endpoint
+   ```bash
+   talosctl --nodes 10.0.0.5 get machineconfig -o yaml
+   ```
+
+3. **Certificate issues**: Check if certificates are valid
+   ```bash
+   talosctl --nodes 10.0.0.5 get secrets
+   ```
+
+### Node NotReady Status
+
+**Symptoms**: `kubectl get nodes` shows node as NotReady
+
+**Diagnosis**:
+
+```bash
+# Check node conditions
+kubectl describe node worker-1
+
+# Check kubelet status
+talosctl --nodes 10.0.0.5 service kubelet status
+
+# Check CNI pods
+kubectl get pods -n kube-system | grep -E 'cilium|calico|flannel'
+```
+
+**Solutions**:
+
+1. **Restart kubelet**:
+   ```bash
+   talosctl --nodes 10.0.0.5 service kubelet restart
+   ```
+
+2. **Check disk pressure**:
+   ```bash
+   talosctl --nodes 10.0.0.5 disks
+   talosctl --nodes 10.0.0.5 diskusage /
+   ```
+
+3. **Check memory pressure**:
+   ```bash
+   talosctl --nodes 10.0.0.5 memory
+   ```
+
+### High Resource Usage
+
+**Check CPU and memory**:
+
+```bash
+talosctl --nodes 10.0.0.2 stats
+talosctl --nodes 10.0.0.2 processes
+```
+
+**Check disk usage**:
+
+```bash
+talosctl --nodes 10.0.0.2 diskusage /
+talosctl --nodes 10.0.0.2 diskusage /var
+```
+
+**Identify resource-intensive processes**:
+
+```bash
+talosctl --nodes 10.0.0.2 processes --sort cpu
+talosctl --nodes 10.0.0.2 processes --sort mem
+```
+
+## etcd Issues
+
+### etcd Member Unhealthy
+
+**Diagnosis**:
+
+```bash
+# Check etcd status
+talosctl --nodes 10.0.0.2,10.0.0.3,10.0.0.4 etcd status
+
+# Check etcd alarms
+talosctl --nodes 10.0.0.2 etcd alarm list
+
+# Check etcd logs
+talosctl --nodes 10.0.0.2 logs etcd
+```
+
+**Common issues**:
+
+1. **NOSPACE alarm**: Database full
+   ```bash
+   # Defragment database
+   talosctl --nodes 10.0.0.2 etcd defrag
+   
+   # Disarm alarm
+   talosctl --nodes 10.0.0.2 etcd alarm disarm
+   ```
+
+2. **Network partitions**: Check connectivity
+   ```bash
+   # Test connectivity between control plane nodes
+   talosctl --nodes 10.0.0.2 get addresses
+   ping 10.0.0.3
+   ```
+
+3. **Quorum lost**: Restore from backup (see disaster recovery)
+
+### etcd Performance Issues
+
+**Symptoms**: Slow API responses, increased latency
+
+**Diagnosis**:
+
+```bash
+# Check etcd metrics
+talosctl --nodes 10.0.0.2 etcd status
+
+# Check disk I/O
+talosctl --nodes 10.0.0.2 disks
+```
+
+**Solutions**:
+
+1. **Defragment database**:
+   ```bash
+   talosctl --nodes 10.0.0.2 etcd defrag
+   ```
+
+2. **Check for large database**:
+   ```bash
+   # If DB > 8GB, consider cluster issues
+   talosctl --nodes 10.0.0.2 etcd status
+   ```
+
+## Kubernetes Control Plane Issues
+
+### API Server Not Responding
+
+**Diagnosis**:
+
+```bash
+# Check API server pod
+kubectl get pods -n kube-system | grep apiserver
+
+# Check API server logs
+talosctl --nodes 10.0.0.2 logs --kubernetes kube-apiserver-controlplane-1
+
+# Check service status
+talosctl --nodes 10.0.0.2 services
+```
+
+**Solutions**:
+
+1. **Restart static pod** (by removing manifests temporarily):
+   ```bash
+   # Static pods automatically restart
+   talosctl --nodes 10.0.0.2 service kubelet restart
+   ```
+
+2. **Check certificates**:
+   ```bash
+   talosctl --nodes 10.0.0.2 get secrets
+   ```
+
+### Scheduler or Controller Manager Issues
+
+**Check component status**:
+
+```bash
+# Check pods
+kubectl get pods -n kube-system | grep -E 'scheduler|controller-manager'
+
+# Check logs
+talosctl --nodes 10.0.0.2 logs --kubernetes kube-scheduler-controlplane-1
+talosctl --nodes 10.0.0.2 logs --kubernetes kube-controller-manager-controlplane-1
+```
+
+## Networking Issues
+
+### Pods Can't Communicate
+
+**Diagnosis**:
+
+```bash
+# Check CNI pods
+kubectl get pods -n kube-system | grep -E 'cilium|calico|flannel'
+
+# Check pod network
+kubectl exec -it <pod-name> -- ping <other-pod-ip>
+
+# Check network policies
+kubectl get networkpolicies -A
+```
+
+**Solutions**:
+
+1. **Restart CNI pods**:
+   ```bash
+   kubectl rollout restart daemonset/cilium -n kube-system
+   ```
+
+2. **Check routing**:
+   ```bash
+   talosctl --nodes 10.0.0.2 get routes
+   talosctl --nodes 10.0.0.2 get links
+   ```
+
+### DNS Resolution Issues
+
+**Diagnosis**:
+
+```bash
+# Check CoreDNS pods
+kubectl get pods -n kube-system -l k8s-app=kube-dns
+
+# Test DNS resolution
+kubectl run -it --rm debug --image=busybox --restart=Never -- nslookup kubernetes.default
+
+# Check CoreDNS logs
+kubectl logs -n kube-system -l k8s-app=kube-dns
+```
+
+**Solutions**:
+
+1. **Restart CoreDNS**:
+   ```bash
+   kubectl rollout restart deployment/coredns -n kube-system
+   ```
+
+2. **Check CoreDNS configuration**:
+   ```bash
+   kubectl get configmap -n kube-system coredns -o yaml
+   ```
+
+## Configuration Issues
+
+### Invalid Configuration Applied
+
+**Symptoms**: Node becomes unreachable after configuration change
+
+**Recovery**:
+
+1. **Wait for try-mode timeout** (if using try mode):
+   - Configuration automatically rolls back after timeout
+
+2. **Access via maintenance mode**:
+   ```bash
+   # Boot into maintenance mode and reapply valid config
+   talosctl apply-config --insecure --nodes 10.0.0.2 --file valid-config.yaml
+   ```
+
+3. **Use staged mode** for safer changes:
+   ```bash
+   talosctl apply-config --nodes 10.0.0.2 --file config.yaml --mode staged
+   # Verify changes after reboot
+   talosctl reboot --nodes 10.0.0.2
+   ```
+
+### Certificate Errors
+
+**Symptoms**: "certificate has expired" or "certificate signed by unknown authority"
+
+**Solutions**:
+
+1. **Regenerate certificates**:
+   ```bash
+   # Generate new talosconfig
+   talosctl config new talosconfig-new --roles admin
+   ```
+
+2. **Use insecure mode for recovery**:
+   ```bash
+   talosctl --insecure --nodes 10.0.0.2 <command>
+   ```
+
+## Diagnostic Commands Reference
+
+### System Information
+
+```bash
+# Node version and info
+talosctl --nodes 10.0.0.2 version
+
+# Hardware information
+talosctl --nodes 10.0.0.2 disks
+talosctl --nodes 10.0.0.2 get processors
+talosctl --nodes 10.0.0.2 get memory
+
+# Network configuration
+talosctl --nodes 10.0.0.2 get addresses
+talosctl --nodes 10.0.0.2 get routes
+talosctl --nodes 10.0.0.2 get links
+```
+
+### Service Status
+
+```bash
+# All services
+talosctl --nodes 10.0.0.2 services
+
+# Specific service
+talosctl --nodes 10.0.0.2 service kubelet status
+
+# Restart service
+talosctl --nodes 10.0.0.2 service kubelet restart
+```
+
+### Container Information
+
+```bash
+# List containers
+talosctl --nodes 10.0.0.2 containers
+talosctl --nodes 10.0.0.2 containers --kubernetes
+
+# Container logs
+talosctl --nodes 10.0.0.2 logs <container-name>
+```
+
+### Resource Monitoring
+
+```bash
+# Real-time stats
+talosctl --nodes 10.0.0.2 stats
+
+# Process list
+talosctl --nodes 10.0.0.2 processes
+
+# Memory usage
+talosctl --nodes 10.0.0.2 memory
+
+# Disk usage
+talosctl --nodes 10.0.0.2 diskusage /
+```
+
+## Getting Support
+
+When seeking help, collect diagnostic information:
+
+### Generate Support Bundle
+
+```bash
+talosctl --nodes 10.0.0.2 support
+```
+
+This generates a comprehensive support bundle including:
+- Service logs
+- System information
+- Configuration (sanitized)
+- Resource states
+
+### Community Support
+
+- **GitHub Issues**: Report bugs at https://github.com/siderolabs/talos/issues
+- **Slack**: Join the Talos community Slack for questions
+- **Documentation**: https://www.talos.dev/docs/
+
+When reporting issues, include:
+- Talos version (`talosctl version`)
+- Kubernetes version
+- Infrastructure (cloud provider, bare metal, etc.)
+- Steps to reproduce
+- Relevant logs and error messages

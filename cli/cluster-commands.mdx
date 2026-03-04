@@ -1,0 +1,391 @@
+---
+title: Cluster Commands
+description: Commands for creating and managing local Talos clusters
+---
+
+## Overview
+
+Cluster commands manage local Talos Linux clusters for development and testing. These clusters can be created using Docker or QEMU as the provisioner.
+
+## cluster create
+
+Create a local Talos Kubernetes cluster for development and testing.
+
+```bash
+talosctl cluster create [flags]
+```
+
+### Description
+
+Creates a local Talos cluster using Docker containers or QEMU VMs. The cluster includes control plane and worker nodes with networking configured automatically.
+
+### Flags
+
+<ParamField path="--name" type="string" default="talos-default">
+  Name of the cluster
+  
+  **Example:**
+  ```bash
+  talosctl cluster create --name my-dev-cluster
+  ```
+</ParamField>
+
+<ParamField path="--provisioner" type="string" default="docker">
+  Talos cluster provisioner to use (docker or qemu)
+  
+  **Example:**
+  ```bash
+  talosctl cluster create --provisioner qemu
+  ```
+</ParamField>
+
+<ParamField path="--state" type="string">
+  Directory path to store cluster state
+  
+  **Default:** `~/.talos/clusters`
+</ParamField>
+
+<ParamField path="--controlplanes" type="int" default="1">
+  Number of control plane nodes
+  
+  **Example:**
+  ```bash
+  talosctl cluster create --controlplanes 3
+  ```
+</ParamField>
+
+<ParamField path="--workers" type="int" default="0">
+  Number of worker nodes
+  
+  **Example:**
+  ```bash
+  talosctl cluster create --workers 2
+  ```
+</ParamField>
+
+<ParamField path="--cpus" type="string" default="2.0">
+  Number of CPUs per node
+  
+  **Example:**
+  ```bash
+  talosctl cluster create --cpus 4.0
+  ```
+</ParamField>
+
+<ParamField path="--memory" type="int" default="2048">
+  Memory (MB) per node
+  
+  **Example:**
+  ```bash
+  talosctl cluster create --memory 4096
+  ```
+</ParamField>
+
+<ParamField path="--disk" type="int" default="6144">
+  Disk size (MB) per node
+  
+  **Example:**
+  ```bash
+  talosctl cluster create --disk 10240
+  ```
+</ParamField>
+
+<ParamField path="--install-image" type="string">
+  The installer image to use
+  
+  **Default:** Latest Talos installer image
+  
+  **Example:**
+  ```bash
+  talosctl cluster create --install-image ghcr.io/siderolabs/installer:v1.8.0
+  ```
+</ParamField>
+
+<ParamField path="--with-init-node" type="boolean" default="true">
+  Create the cluster with an init node
+</ParamField>
+
+<ParamField path="--kubernetes-version" type="string">
+  Desired Kubernetes version to run
+  
+  **Example:**
+  ```bash
+  talosctl cluster create --kubernetes-version 1.31.0
+  ```
+</ParamField>
+
+<ParamField path="--endpoint" type="string">
+  Use a custom endpoint for the cluster endpoint
+</ParamField>
+
+<ParamField path="--skip-injecting-config" type="boolean" default="false">
+  Skip injecting the Talos API config into the generated talosconfig
+</ParamField>
+
+<ParamField path="--talos-version" type="string">
+  The desired Talos version to use for the cluster
+</ParamField>
+
+<ParamField path="--encrypt-ephemeral" type="boolean" default="false">
+  Enable ephemeral partition encryption
+</ParamField>
+
+<ParamField path="--encrypt-state" type="boolean" default="false">
+  Enable state partition encryption
+</ParamField>
+
+### Examples
+
+**Create a simple single-node cluster**
+```bash
+talosctl cluster create
+```
+
+**Create a 3 control plane + 2 worker cluster**
+```bash
+talosctl cluster create \
+  --name production-like \
+  --controlplanes 3 \
+  --workers 2 \
+  --cpus 4.0 \
+  --memory 8192
+```
+
+**Create a cluster with specific Kubernetes version**
+```bash
+talosctl cluster create \
+  --name k8s-1-30 \
+  --kubernetes-version 1.30.0
+```
+
+**Create a cluster with QEMU provisioner**
+```bash
+talosctl cluster create \
+  --provisioner qemu \
+  --name qemu-cluster \
+  --controlplanes 1 \
+  --workers 1
+```
+
+**Output:**
+```
+validating CIDR and reserving IPs
+generated talosconfig for cluster talos-default
+provisioning nodes
+creating load balancer
+creating control plane node talos-default-controlplane-1
+creating worker node talos-default-worker-1
+waiting for API
+bootstrapping cluster
+waiting for etcd
+waiting for kubelet
+waiting for services
+Kubernetes cluster ready!
+```
+
+---
+
+## cluster destroy
+
+Destroy a local Talos Kubernetes cluster.
+
+```bash
+talosctl cluster destroy [flags]
+```
+
+### Description
+
+Destroys a previously created local cluster, removing all containers/VMs and associated resources.
+
+### Flags
+
+<ParamField path="--name" type="string" default="talos-default">
+  Name of the cluster to destroy
+</ParamField>
+
+<ParamField path="--state" type="string">
+  Directory path where cluster state is stored
+  
+  **Default:** `~/.talos/clusters`
+</ParamField>
+
+<ParamField path="--force" type="boolean" default="false">
+  Force deletion of cluster directory if there were errors
+  
+  Short flag: `-f`
+  
+  **Example:**
+  ```bash
+  talosctl cluster destroy --force
+  ```
+</ParamField>
+
+<ParamField path="--save-support-archive-path" type="string">
+  Save support archive to the specified file on destroy
+  
+  **Example:**
+  ```bash
+  talosctl cluster destroy --save-support-archive-path ./support.zip
+  ```
+</ParamField>
+
+<ParamField path="--save-cluster-logs-archive-path" type="string">
+  Save cluster logs archive to the specified file on destroy
+  
+  **Example:**
+  ```bash
+  talosctl cluster destroy --save-cluster-logs-archive-path ./logs.tar.gz
+  ```
+</ParamField>
+
+### Examples
+
+**Destroy the default cluster**
+```bash
+talosctl cluster destroy
+```
+
+**Destroy a specific cluster**
+```bash
+talosctl cluster destroy --name my-dev-cluster
+```
+
+**Destroy and save diagnostics**
+```bash
+talosctl cluster destroy \
+  --name my-cluster \
+  --save-support-archive-path ./diagnostics.zip \
+  --save-cluster-logs-archive-path ./logs.tar.gz
+```
+
+**Force destroy even if errors occur**
+```bash
+talosctl cluster destroy --force
+```
+
+**Output:**
+```
+destroying node talos-default-controlplane-1
+destroying node talos-default-worker-1
+destroying load balancer
+removing cluster state directory
+```
+
+---
+
+## cluster show
+
+Show details about a local Talos cluster.
+
+```bash
+talosctl cluster show [flags]
+```
+
+### Description
+
+Displays information about a running local cluster including node IPs, roles, and status.
+
+### Flags
+
+<ParamField path="--name" type="string" default="talos-default">
+  Name of the cluster to show
+</ParamField>
+
+<ParamField path="--state" type="string">
+  Directory path where cluster state is stored
+  
+  **Default:** `~/.talos/clusters`
+</ParamField>
+
+### Examples
+
+**Show default cluster**
+```bash
+talosctl cluster show
+```
+
+**Show specific cluster**
+```bash
+talosctl cluster show --name production-like
+```
+
+**Output:**
+```
+NAME                              ROLE              IPS               STATE
+talos-default-controlplane-1      controlplane      172.20.0.2        running
+talos-default-worker-1            worker            172.20.0.3        running
+
+Provisioner: docker
+Kubernetes API: https://172.20.0.2:6443
+Talos API: 172.20.0.2
+```
+
+---
+
+## Common Workflows
+
+### Development Cluster Lifecycle
+
+**Create a development cluster**
+```bash
+talosctl cluster create --name dev --workers 1
+```
+
+**Get cluster information**
+```bash
+talosctl cluster show --name dev
+```
+
+**Use the cluster**
+```bash
+export KUBECONFIG=~/.talos/clusters/dev/kubeconfig
+kubectl get nodes
+```
+
+**Clean up**
+```bash
+talosctl cluster destroy --name dev
+```
+
+### Testing Different Configurations
+
+**Test with encryption enabled**
+```bash
+talosctl cluster create \
+  --name encrypted-test \
+  --encrypt-state \
+  --encrypt-ephemeral
+```
+
+**Test with specific Talos version**
+```bash
+talosctl cluster create \
+  --name version-test \
+  --talos-version v1.7.0 \
+  --kubernetes-version 1.30.0
+```
+
+### Multi-Node Testing
+
+**Create a realistic cluster**
+```bash
+talosctl cluster create \
+  --name ha-test \
+  --controlplanes 3 \
+  --workers 3 \
+  --cpus 2.0 \
+  --memory 4096
+```
+
+**Verify cluster health**
+```bash
+talosctl --context ha-test health \
+  --control-plane-nodes 172.20.0.2,172.20.0.3,172.20.0.4 \
+  --worker-nodes 172.20.0.5,172.20.0.6,172.20.0.7
+```
+
+## See Also
+
+- [CLI Overview](/cli/overview) - Installation and basic usage
+- [Node Commands](/cli/node-commands) - Node operation commands
+- [Config Commands](/cli/config-commands) - Configuration management

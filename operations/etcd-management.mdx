@@ -1,0 +1,382 @@
+---
+title: etcd Management
+description: Managing etcd clusters in Talos including backup, restore, maintenance, and defragmentation operations.
+---
+
+etcd is the distributed key-value store that serves as the backing store for all Kubernetes cluster data. Proper etcd management is critical for cluster reliability and disaster recovery.
+
+## etcd Cluster Overview
+
+In Talos, etcd runs on control plane nodes and is automatically configured and managed by the system. Each control plane node runs an etcd member that participates in the etcd cluster.
+
+### Viewing etcd Members
+
+List all etcd cluster members:
+
+```bash
+talosctl --nodes 10.0.0.2 etcd members
+```
+
+Example output:
+```
+NODE         ID               HOSTNAME        PEER URLS                CLIENT URLS              LEARNER
+10.0.0.2     6457a4e8ecba5c61 controlplane-1  https://10.0.0.2:2380    https://10.0.0.2:2379    false
+10.0.0.3     7d3c4c7e8f9a1b2c controlplane-2  https://10.0.0.3:2380    https://10.0.0.3:2379    false
+10.0.0.4     8e4d5d8f9g0b2c3d controlplane-3  https://10.0.0.4:2380    https://10.0.0.4:2379    false
+```
+
+### Checking etcd Status
+
+View detailed status of etcd members:
+
+```bash
+talosctl --nodes 10.0.0.2,10.0.0.3,10.0.0.4 etcd status
+```
+
+Example output:
+```
+NODE       MEMBER           DB SIZE    IN USE           LEADER           RAFT INDEX  RAFT TERM  LEARNER
+10.0.0.2   6457a4e8ecba5c61 25 MB      18 MB (72.00%)   6457a4e8ecba5c61 123456      12         false
+10.0.0.3   7d3c4c7e8f9a1b2c 25 MB      18 MB (72.00%)   6457a4e8ecba5c61 123456      12         false
+10.0.0.4   8e4d5d8f9g0b2c3d 25 MB      18 MB (72.00%)   6457a4e8ecba5c61 123456      12         false
+```
+
+The status shows:
+- **DB SIZE**: Total database size
+- **IN USE**: Actual data size (percentage used)
+- **LEADER**: Current etcd leader member ID
+- **RAFT INDEX**: Current Raft log index
+- **RAFT TERM**: Current Raft term
+
+## etcd Backup
+
+Regular etcd backups are essential for disaster recovery. Talos provides a built-in snapshot mechanism.
+
+### Creating a Snapshot
+
+Create an etcd snapshot and save it locally:
+
+```bash
+talosctl --nodes 10.0.0.2 etcd snapshot db.snapshot
+```
+
+Example output:
+```
+etcd snapshot saved to "db.snapshot" (25165824 bytes)
+snapshot info: hash 12ab34cd, revision 123456, total keys 5234, total size 25165824
+```
+
+<Note>
+  Take snapshots from a single etcd member. All members have the same data, so there's no need to snapshot all nodes.
+</Note>
+
+### Automated Backup Script
+
+Create a script to automate regular backups:
+
+```bash
+#!/bin/bash
+BACKUP_DIR="/backups/etcd"
+DATE=$(date +%Y%m%d-%H%M%S)
+FILENAME="etcd-snapshot-${DATE}.db"
+
+mkdir -p ${BACKUP_DIR}
+
+talosctl --nodes 10.0.0.2 etcd snapshot ${BACKUP_DIR}/${FILENAME}
+
+if [ $? -eq 0 ]; then
+    echo "Backup successful: ${FILENAME}"
+    # Keep only last 7 days of backups
+    find ${BACKUP_DIR} -name "etcd-snapshot-*.db" -mtime +7 -delete
+else
+    echo "Backup failed!"
+    exit 1
+fi
+```
+
+Run this script via cron for automated backups:
+```bash
+# Daily backup at 2 AM
+0 2 * * * /usr/local/bin/etcd-backup.sh
+```
+
+### Verifying Snapshot Integrity
+
+The snapshot command automatically verifies the checksum. The output includes the hash which can be used to verify integrity later.
+
+## etcd Restore
+
+Restore etcd from a snapshot during disaster recovery.
+
+<Warning>
+  Restoring etcd will replace all current cluster data. Only perform this operation if you need to recover from a catastrophic failure.
+</Warning>
+
+### Bootstrap from Snapshot
+
+Restore etcd cluster from a snapshot:
+
+<Steps>
+  <Step title="Prepare the snapshot">
+    Ensure you have a valid etcd snapshot file:
+
+    ```bash
+    ls -lh db.snapshot
+    ```
+  </Step>
+
+  <Step title="Bootstrap with recovery">
+    Bootstrap the first control plane node with the snapshot:
+
+    ```bash
+    talosctl --nodes 10.0.0.2 bootstrap --recover-from=db.snapshot
+    ```
+
+    Example output:
+    ```
+    recovering from snapshot "db.snapshot": hash 12ab34cd, revision 123456, total keys 5234, total size 25165824
+    ```
+  </Step>
+
+  <Step title="Wait for cluster recovery">
+    Monitor the recovery process:
+
+    ```bash
+    talosctl --nodes 10.0.0.2 etcd members
+    kubectl get nodes
+    ```
+
+    Other control plane nodes will automatically rejoin the recovered etcd cluster.
+  </Step>
+</Steps>
+
+### Skip Hash Check (Advanced)
+
+If recovering from a data directory copy instead of a proper snapshot:
+
+```bash
+talosctl --nodes 10.0.0.2 bootstrap \
+  --recover-from=db.snapshot \
+  --recover-skip-hash-check
+```
+
+<Warning>
+  Only use `--recover-skip-hash-check` when recovering from a data directory backup. This skips integrity verification.
+</Warning>
+
+## etcd Maintenance
+
+### Defragmentation
+
+etcd databases can become fragmented over time, wasting disk space. Defragmentation compacts the database.
+
+```bash
+talosctl --nodes 10.0.0.2 etcd defrag
+```
+
+<Warning>
+  Defragmentation is a resource-intensive operation. Only defragment one node at a time and during low-traffic periods.
+</Warning>
+
+**Best practices for defragmentation:**
+
+1. Check current database usage:
+   ```bash
+   talosctl --nodes 10.0.0.2 etcd status
+   ```
+
+2. Defragment if IN USE percentage is low (e.g., < 60%):
+   ```bash
+   # Defragment each node sequentially
+   talosctl --nodes 10.0.0.2 etcd defrag
+   sleep 60
+   talosctl --nodes 10.0.0.3 etcd defrag
+   sleep 60
+   talosctl --nodes 10.0.0.4 etcd defrag
+   ```
+
+3. Verify database size reduction:
+   ```bash
+   talosctl --nodes 10.0.0.2,10.0.0.3,10.0.0.4 etcd status
+   ```
+
+### Managing etcd Alarms
+
+etcd can trigger alarms when issues occur (e.g., storage quota exceeded).
+
+**List active alarms:**
+```bash
+talosctl --nodes 10.0.0.2 etcd alarm list
+```
+
+Example output:
+```
+NODE       MEMBER           ALARM
+10.0.0.2   6457a4e8ecba5c61 NOSPACE
+```
+
+**Disarm alarms** (after resolving the underlying issue):
+```bash
+talosctl --nodes 10.0.0.2 etcd alarm disarm
+```
+
+### Handling NOSPACE Alarm
+
+If etcd runs out of space:
+
+<Steps>
+  <Step title="Identify the issue">
+    ```bash
+    talosctl --nodes 10.0.0.2 etcd status
+    talosctl --nodes 10.0.0.2 etcd alarm list
+    ```
+  </Step>
+
+  <Step title="Free up space">
+    Defragment the database:
+    ```bash
+    talosctl --nodes 10.0.0.2 etcd defrag
+    ```
+  </Step>
+
+  <Step title="Disarm the alarm">
+    ```bash
+    talosctl --nodes 10.0.0.2 etcd alarm disarm
+    ```
+  </Step>
+
+  <Step title="Verify recovery">
+    ```bash
+    talosctl --nodes 10.0.0.2 etcd status
+    ```
+  </Step>
+</Steps>
+
+## etcd Cluster Operations
+
+### Removing a Member
+
+Gracefully remove a control plane node from etcd:
+
+```bash
+talosctl --nodes 10.0.0.3 etcd leave
+```
+
+This command:
+1. Removes the node from etcd cluster
+2. Notifies other members
+3. Shuts down the local etcd instance
+
+### Force Remove a Member
+
+If a node is completely unreachable, force remove it:
+
+```bash
+# Get member ID from etcd members list
+talosctl --nodes 10.0.0.2 etcd members
+
+# Remove by member ID
+talosctl --nodes 10.0.0.2 etcd remove-member 7d3c4c7e8f9a1b2c
+```
+
+<Warning>
+  Only use `remove-member` when the node is permanently lost or cannot call `etcd leave`. Always prefer `etcd leave` over force removal.
+</Warning>
+
+### Forfeit Leadership
+
+Force an etcd member to give up leadership:
+
+```bash
+talosctl --nodes 10.0.0.2 etcd forfeit-leadership
+```
+
+Useful when:
+- Performing maintenance on the leader node
+- Testing leader election
+- Troubleshooting leader-specific issues
+
+## Monitoring etcd Health
+
+Regular health monitoring helps prevent issues:
+
+### Health Check Script
+
+```bash
+#!/bin/bash
+
+echo "=== etcd Member Status ==="
+talosctl --nodes 10.0.0.2,10.0.0.3,10.0.0.4 etcd status
+
+echo ""
+echo "=== etcd Alarms ==="
+talosctl --nodes 10.0.0.2 etcd alarm list
+
+echo ""
+echo "=== etcd Members ==="
+talosctl --nodes 10.0.0.2 etcd members
+
+# Check for unhealthy members
+UNHEALTHY=$(talosctl --nodes 10.0.0.2,10.0.0.3,10.0.0.4 etcd status | grep -v "false" | wc -l)
+if [ $UNHEALTHY -gt 3 ]; then
+    echo "WARNING: Unhealthy etcd members detected!"
+    exit 1
+fi
+
+echo "etcd cluster is healthy"
+```
+
+### Key Metrics to Monitor
+
+- **DB Size**: Should grow predictably; sudden increases indicate issues
+- **IN USE %**: Values < 50% suggest fragmentation; consider defragmentation
+- **Leader stability**: Frequent leader changes indicate network or performance issues
+- **Raft index lag**: Members should have similar Raft indices; large differences indicate sync issues
+
+## etcd Performance Tuning
+
+### Database Size Management
+
+Keep etcd database size under control:
+
+1. **Regular defragmentation**: Run monthly or when IN USE < 60%
+2. **Compact history**: Kubernetes automatically compacts old revisions
+3. **Limit object sizes**: Avoid storing large objects in Kubernetes
+
+### Monitoring Best Practices
+
+- Take daily snapshots and store them off-cluster
+- Monitor database size trends
+- Set up alerts for:
+  - etcd alarms
+  - Database size > 8GB (consider resizing)
+  - Defragmentation needed (IN USE < 50%)
+  - Leader election changes
+
+## Troubleshooting etcd
+
+### Split Brain Scenario
+
+If etcd members can't reach consensus:
+
+1. Check network connectivity between control plane nodes
+2. Verify etcd member status
+3. Check for conflicting member IDs
+4. Restore from backup if necessary
+
+### Member Not Syncing
+
+If a member falls behind:
+
+```bash
+# Check if member is learner or having issues
+talosctl --nodes 10.0.0.3 etcd status
+
+# Check logs for errors
+talosctl --nodes 10.0.0.3 logs etcd
+
+# If needed, remove and re-add the member
+talosctl --nodes 10.0.0.3 etcd leave
+# Re-apply the machine configuration
+talosctl apply-config --nodes 10.0.0.3 --file controlplane.yaml
+```

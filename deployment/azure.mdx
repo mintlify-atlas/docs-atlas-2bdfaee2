@@ -1,0 +1,578 @@
+---
+title: Azure Deployment
+description: Deploy Talos Linux on Microsoft Azure with native Azure integration
+---
+
+Talos Linux provides native support for Microsoft Azure with automatic metadata discovery and platform-specific optimizations.
+
+## Overview
+
+The Azure platform integration includes:
+
+- Automatic network configuration via Azure IMDS (Instance Metadata Service)
+- Azure-specific kernel parameters and serial console configuration
+- Instance metadata (region, zone, VM size, spot instance detection)
+- Custom data based configuration delivery via ovf-env.xml
+- Load balancer IP detection
+- Dual-stack IPv4/IPv6 support
+
+## Prerequisites
+
+- Azure subscription with VM creation permissions
+- Azure CLI (`az`) configured
+- `talosctl` installed
+- (Optional) Terraform for infrastructure automation
+
+## Quick Start with Custom Image
+
+### Upload Talos Image
+
+<Steps>
+  <Step title="Download Talos VHD">
+    Download the Azure VHD image:
+    
+    ```bash
+    curl -LO https://github.com/siderolabs/talos/releases/latest/download/azure-amd64.vhd.xz
+    xz -d azure-amd64.vhd.xz
+    ```
+  </Step>
+  
+  <Step title="Create Storage Account">
+    Create a storage account and container:
+    
+    ```bash
+    az storage account create \
+      --name talosstorageacct \
+      --resource-group myResourceGroup \
+      --location eastus \
+      --sku Standard_LRS
+    
+    az storage container create \
+      --name images \
+      --account-name talosstorageacct
+    ```
+  </Step>
+  
+  <Step title="Upload VHD">
+    Upload the VHD:
+    
+    ```bash
+    az storage blob upload \
+      --account-name talosstorageacct \
+      --container-name images \
+      --name talos-latest.vhd \
+      --file azure-amd64.vhd \
+      --type page
+    ```
+  </Step>
+  
+  <Step title="Create Image">
+    Create a managed image:
+    
+    ```bash
+    az image create \
+      --resource-group myResourceGroup \
+      --name talos-latest \
+      --os-type Linux \
+      --source https://talosstorageacct.blob.core.windows.net/images/talos-latest.vhd
+    ```
+  </Step>
+</Steps>
+
+### Launch VM
+
+<Steps>
+  <Step title="Generate Configuration">
+    Create machine configuration:
+    
+    ```bash
+    talosctl gen config my-cluster \
+      https://api.my-cluster.example.com:6443
+    ```
+  </Step>
+  
+  <Step title="Create Control Plane VM">
+    Launch VM with custom data:
+    
+    ```bash
+    az vm create \
+      --resource-group myResourceGroup \
+      --name talos-cp-1 \
+      --image talos-latest \
+      --size Standard_B2s \
+      --admin-username talos \
+      --custom-data controlplane.yaml \
+      --public-ip-address-allocation static
+    ```
+  </Step>
+  
+  <Step title="Get VM IP">
+    Retrieve the public IP:
+    
+    ```bash
+    INSTANCE_IP=$(az vm show -d \
+      --resource-group myResourceGroup \
+      --name talos-cp-1 \
+      --query publicIps -o tsv)
+    ```
+  </Step>
+  
+  <Step title="Bootstrap Cluster">
+    Bootstrap Kubernetes:
+    
+    ```bash
+    talosctl bootstrap --nodes $INSTANCE_IP
+    talosctl kubeconfig --nodes $INSTANCE_IP
+    ```
+  </Step>
+</Steps>
+
+## Terraform Deployment
+
+<CodeGroup>
+```hcl main.tf
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 3.0"
+    }
+  }
+}
+
+provider "azurerm" {
+  features {}
+}
+
+# Resource group
+resource "azurerm_resource_group" "talos" {
+  name     = "talos-cluster-rg"
+  location = var.location
+}
+
+# Virtual network
+resource "azurerm_virtual_network" "talos" {
+  name                = "talos-vnet"
+  address_space       = ["10.0.0.0/16"]
+  location            = azurerm_resource_group.talos.location
+  resource_group_name = azurerm_resource_group.talos.name
+}
+
+resource "azurerm_subnet" "talos" {
+  name                 = "talos-subnet"
+  resource_group_name  = azurerm_resource_group.talos.name
+  virtual_network_name = azurerm_virtual_network.talos.name
+  address_prefixes     = ["10.0.1.0/24"]
+}
+
+# Control plane VMs
+resource "azurerm_linux_virtual_machine" "control_plane" {
+  count               = 3
+  name                = "talos-cp-${count.index + 1}"
+  resource_group_name = azurerm_resource_group.talos.name
+  location            = azurerm_resource_group.talos.location
+  size                = "Standard_B2s"
+  
+  admin_username = "talos"
+  
+  network_interface_ids = [
+    azurerm_network_interface.control_plane[count.index].id,
+  ]
+  
+  custom_data = base64encode(file("controlplane.yaml"))
+  
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Premium_LRS"
+    disk_size_gb         = 50
+  }
+  
+  source_image_id = azurerm_image.talos.id
+  
+  # Disable password authentication
+  disable_password_authentication = true
+  
+  admin_ssh_key {
+    username   = "talos"
+    public_key = "ssh-rsa AAAA..."  # Placeholder, not used
+  }
+}
+
+# Worker VMs
+resource "azurerm_linux_virtual_machine" "worker" {
+  count               = 3
+  name                = "talos-worker-${count.index + 1}"
+  resource_group_name = azurerm_resource_group.talos.name
+  location            = azurerm_resource_group.talos.location
+  size                = "Standard_B4ms"
+  
+  admin_username = "talos"
+  
+  network_interface_ids = [
+    azurerm_network_interface.worker[count.index].id,
+  ]
+  
+  custom_data = base64encode(file("worker.yaml"))
+  
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Premium_LRS"
+    disk_size_gb         = 100
+  }
+  
+  source_image_id = azurerm_image.talos.id
+  
+  disable_password_authentication = true
+  
+  admin_ssh_key {
+    username   = "talos"
+    public_key = "ssh-rsa AAAA..."  # Placeholder
+  }
+}
+
+# Load balancer for control plane
+resource "azurerm_lb" "control_plane" {
+  name                = "talos-cp-lb"
+  location            = azurerm_resource_group.talos.location
+  resource_group_name = azurerm_resource_group.talos.name
+  sku                 = "Standard"
+  
+  frontend_ip_configuration {
+    name                 = "PublicIPAddress"
+    public_ip_address_id = azurerm_public_ip.control_plane_lb.id
+  }
+}
+
+resource "azurerm_lb_backend_address_pool" "control_plane" {
+  loadbalancer_id = azurerm_lb.control_plane.id
+  name            = "talos-cp-backend-pool"
+}
+
+resource "azurerm_lb_rule" "kubernetes_api" {
+  loadbalancer_id                = azurerm_lb.control_plane.id
+  name                           = "kubernetes-api"
+  protocol                       = "Tcp"
+  frontend_port                  = 6443
+  backend_port                   = 6443
+  frontend_ip_configuration_name = "PublicIPAddress"
+  backend_address_pool_ids       = [azurerm_lb_backend_address_pool.control_plane.id]
+  probe_id                       = azurerm_lb_probe.kubernetes_api.id
+}
+
+resource "azurerm_lb_probe" "kubernetes_api" {
+  loadbalancer_id = azurerm_lb.control_plane.id
+  name            = "kubernetes-api-probe"
+  protocol        = "Tcp"
+  port            = 6443
+}
+```
+
+```hcl network.tf
+# Network interfaces
+resource "azurerm_network_interface" "control_plane" {
+  count               = 3
+  name                = "talos-cp-nic-${count.index + 1}"
+  location            = azurerm_resource_group.talos.location
+  resource_group_name = azurerm_resource_group.talos.name
+  
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.talos.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.control_plane[count.index].id
+  }
+}
+
+resource "azurerm_network_interface" "worker" {
+  count               = 3
+  name                = "talos-worker-nic-${count.index + 1}"
+  location            = azurerm_resource_group.talos.location
+  resource_group_name = azurerm_resource_group.talos.name
+  
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.talos.id
+    private_ip_address_allocation = "Dynamic"
+  }
+}
+
+# Public IPs
+resource "azurerm_public_ip" "control_plane" {
+  count               = 3
+  name                = "talos-cp-ip-${count.index + 1}"
+  location            = azurerm_resource_group.talos.location
+  resource_group_name = azurerm_resource_group.talos.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+resource "azurerm_public_ip" "control_plane_lb" {
+  name                = "talos-cp-lb-ip"
+  location            = azurerm_resource_group.talos.location
+  resource_group_name = azurerm_resource_group.talos.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+# Network security group
+resource "azurerm_network_security_group" "talos" {
+  name                = "talos-nsg"
+  location            = azurerm_resource_group.talos.location
+  resource_group_name = azurerm_resource_group.talos.name
+  
+  security_rule {
+    name                       = "Talos-API"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "50000"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+  
+  security_rule {
+    name                       = "Kubernetes-API"
+    priority                   = 101
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "6443"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+```
+
+```hcl variables.tf
+variable "location" {
+  description = "Azure region"
+  type        = string
+  default     = "East US"
+}
+
+variable "cluster_name" {
+  description = "Cluster name"
+  type        = string
+  default     = "talos-cluster"
+}
+```
+</CodeGroup>
+
+## Azure Platform Integration
+
+### Configuration Discovery
+
+Azure delivers configuration through ovf-env.xml on a virtual CD-ROM:
+
+```go
+// From internal/app/machined/pkg/runtime/v1alpha1/platform/azure/azure.go
+func (a *Azure) Configuration(ctx context.Context, r state.State) ([]byte, error) {
+    // Custom data is not available in IMDS, so trying to find it on CDROM.
+    return a.configFromCD()
+}
+
+func (a *Azure) configFromCD() ([]byte, error) {
+    // Mount CD-ROM devices and read ovf-env.xml
+    // Decode base64 encoded CustomData
+}
+```
+
+### Network Configuration
+
+```go
+func (a *Azure) ParseMetadata(metadata *ComputeMetadata, interfaceAddresses []NetworkConfig, host []byte) (*runtime.PlatformNetworkConfig, error) {
+    // Configure DHCP for IPv4
+    networkConfig.Operators = append(networkConfig.Operators, network.OperatorSpecSpec{
+        Operator:    network.OperatorDHCP4,
+        LinkName:    "eth0",
+        RequireUp:   true,
+        ConfigLayer: network.ConfigPlatform,
+    })
+    
+    // Configure DHCP6 for IPv6-enabled interfaces
+    // Set MTU to 1400 for Azure
+    // ...
+}
+```
+
+### Instance Metadata
+
+Automatically discovered:
+
+- Platform: `azure`
+- Region: `eastus`
+- Zone: `eastus-1`
+- VM Size: `Standard_B2s`
+- Resource ID: `/subscriptions/.../resourceGroups/.../providers/Microsoft.Compute/virtualMachines/...`
+- Provider ID: `azure:///...` (lowercase resource group)
+- Spot Instance: detected via `evictionPolicy`
+
+### Kernel Arguments
+
+Azure VMs use specific console configuration:
+
+```bash
+console=ttyS0,115200n8 earlyprintk=ttyS0,115200 rootdelay=300 net.ifnames=0 talos.dashboard.disabled=1 sysctl.kernel.kexec_load_disabled=1
+```
+
+<Note>
+  Azure requires `rootdelay=300` for proper disk initialization. Kexec is disabled as Azure VMs may hang during kexec.
+</Note>
+
+## Configuration
+
+### Machine Configuration Patches
+
+<CodeGroup>
+```yaml azure-controlplane.yaml
+machine:
+  kubelet:
+    extraArgs:
+      cloud-provider: external
+  network:
+    interfaces:
+      - interface: eth0
+        dhcp: true
+        mtu: 1400  # Azure requires lower MTU
+
+cluster:
+  externalCloudProvider:
+    enabled: true
+    manifests:
+      - https://raw.githubusercontent.com/kubernetes-sigs/cloud-provider-azure/master/manifests/cloud-controller-manager.yaml
+```
+
+```yaml azure-ipv6.yaml
+# Enable IPv6 support
+machine:
+  network:
+    interfaces:
+      - interface: eth0
+        dhcp: true
+        dhcpOptions:
+          ipv6: true
+```
+</CodeGroup>
+
+## Managed Identity
+
+Create and assign a managed identity:
+
+```bash
+# Create managed identity
+az identity create \
+  --name talos-cluster-identity \
+  --resource-group myResourceGroup
+
+# Assign to VM
+az vm identity assign \
+  --name talos-cp-1 \
+  --resource-group myResourceGroup \
+  --identities talos-cluster-identity
+
+# Grant permissions
+az role assignment create \
+  --assignee <identity-principal-id> \
+  --role Contributor \
+  --scope /subscriptions/<subscription-id>/resourceGroups/myResourceGroup
+```
+
+## Storage
+
+### Azure Disks
+
+Use Azure Managed Disks:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: azure-disk-claim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: managed-premium
+  resources:
+    requests:
+      storage: 100Gi
+```
+
+### Azure Files
+
+For shared storage:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: azure-files-claim
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: azurefile
+  resources:
+    requests:
+      storage: 100Gi
+```
+
+## Load Balancer IP Detection
+
+Talos automatically detects load balancer IPs:
+
+```go
+// ParseLoadBalancerIP parses Azure LoadBalancer metadata
+func (a *Azure) ParseLoadBalancerIP(lbConfig LoadBalancerMetadata, exIP []netip.Addr) ([]netip.Addr, error) {
+    for _, addr := range lbConfig.LoadBalancer.PublicIPAddresses {
+        if ip, err := netip.ParseAddr(addr.FrontendIPAddress); err == nil {
+            exIP = append(exIP, ip)
+        }
+    }
+    return exIP, nil
+}
+```
+
+## Troubleshooting
+
+### View IMDS Metadata
+
+```bash
+# From VM
+curl -H "Metadata: true" \
+  "http://169.254.169.254/metadata/instance?api-version=2021-02-01"
+```
+
+### Check Platform Configuration
+
+```bash
+talosctl get platformmetadata --nodes <node-ip>
+```
+
+### Serial Console
+
+Access boot diagnostics:
+
+```bash
+az vm boot-diagnostics get-boot-log \
+  --name talos-cp-1 \
+  --resource-group myResourceGroup
+```
+
+### Logs
+
+```bash
+talosctl logs machined --nodes <node-ip>
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Cloud Controller" icon="cloud" href="/kubernetes/cloud-providers">
+    Configure Azure Cloud Controller Manager
+  </Card>
+  <Card title="Load Balancers" icon="balance-scale" href="/networking/load-balancers">
+    Set up Azure load balancing
+  </Card>
+</CardGroup>

@@ -1,0 +1,188 @@
+---
+title: Introduction to Talos Linux
+description: Learn about Talos Linux, a modern, secure, and immutable operating system designed specifically for running Kubernetes.
+---
+
+Talos Linux is a modern OS for running Kubernetes: secure, immutable, and minimal. It's fully open source, production-ready, and supported by the team at [Sidero Labs](https://www.siderolabs.com/).
+
+## What is Talos Linux?
+
+Talos Linux is a purpose-built Linux distribution designed exclusively for Kubernetes. Unlike traditional Linux distributions, Talos has no shell, no SSH access, and no interactive console. All system management is performed via a secure API using the `talosctl` CLI tool and gRPC.
+
+<Note>
+Talos Linux eliminates the traditional attack vectors associated with SSH access and shell commands, providing a minimal and hardened security posture for your Kubernetes infrastructure.
+</Note>
+
+## Key Benefits
+
+Talos Linux delivers three core advantages for Kubernetes operations:
+
+### Security
+
+Talos reduces your attack surface through its minimal, hardened, and immutable design:
+
+- **No SSH or shell access** - eliminates traditional remote access vulnerabilities
+- **API-driven management** - all operations secured with mutual TLS (mTLS) authentication
+- **Immutable infrastructure** - system files cannot be modified at runtime
+- **Minimal footprint** - only essential components required for Kubernetes
+- **Hardened by default** - secure configuration out of the box
+
+### Predictability
+
+Talos eliminates configuration drift and delivers consistent infrastructure:
+
+- **Immutable infrastructure** - no configuration drift between nodes
+- **Declarative configuration** - define desired state, Talos enforces it
+- **Atomic updates** - upgrades are all-or-nothing operations
+- **Reproducible deployments** - identical configuration produces identical results
+
+### Evolvability
+
+Talos simplifies operations and keeps your infrastructure current:
+
+- **Simplified architecture** - purpose-built for Kubernetes only
+- **Increased agility** - API-driven automation enables rapid changes
+- **Current versions** - always delivers stable Kubernetes and Linux kernel versions
+- **Seamless upgrades** - rolling updates with zero-downtime
+
+## Architecture Overview
+
+Talos Linux is built on several key architectural principles:
+
+### API-First Design
+
+Every operation in Talos is performed through the gRPC API. The `talosctl` CLI communicates with the Talos API on port 50000, authenticated via mutual TLS:
+
+```bash
+# All operations go through the API
+talosctl -n <node-ip> version
+talosctl -n <node-ip> get members
+talosctl -n <node-ip> reboot
+```
+
+### Immutable System
+
+The Talos root filesystem is immutable and ephemeral:
+
+- System binaries cannot be modified
+- No package manager or shell access
+- Configuration is declarative and API-driven
+- Updates replace the entire OS image
+
+### Minimal Attack Surface
+
+Talos includes only what's necessary to run Kubernetes:
+
+- Linux kernel (version `6.18.15-talos`)
+- containerd as the container runtime
+- etcd for control plane nodes
+- Kubernetes components
+- Essential networking and storage drivers
+
+## Use Cases
+
+Talos Linux is ideal for:
+
+<CardGroup cols={2}>
+  <Card title="Production Kubernetes" icon="server">
+    Run production workloads with confidence on a secure, minimal OS designed specifically for Kubernetes.
+  </Card>
+  
+  <Card title="Edge Computing" icon="network-wired">
+    Deploy lightweight, secure Kubernetes clusters at the edge with minimal resource overhead.
+  </Card>
+  
+  <Card title="Secure Environments" icon="shield-halved">
+    Meet strict security requirements with an immutable, API-only operating system.
+  </Card>
+  
+  <Card title="Automated Infrastructure" icon="robot">
+    Build fully automated, GitOps-driven infrastructure with API-first management.
+  </Card>
+</CardGroup>
+
+## How Talos Works
+
+Talos Linux operates through a simple workflow:
+
+<Steps>
+  <Step title="Boot">
+    Talos boots from an image (ISO, disk image, or cloud image) and loads the immutable OS into memory.
+  </Step>
+  
+  <Step title="Configure">
+    Apply a machine configuration via the API that defines the node's role (control plane or worker) and settings.
+  </Step>
+  
+  <Step title="Bootstrap">
+    Initialize the Kubernetes cluster by bootstrapping etcd on a control plane node.
+  </Step>
+  
+  <Step title="Operate">
+    Manage the cluster entirely through the Talos API using `talosctl` commands.
+  </Step>
+</Steps>
+
+## Management via talosctl
+
+The `talosctl` CLI is your interface to Talos Linux. Common operations include:
+
+```bash
+# View cluster health
+talosctl -n <node-ip> health
+
+# Get node configuration
+talosctl -n <node-ip> get machineconfig
+
+# View logs
+talosctl -n <node-ip> logs kubelet
+
+# Upgrade the OS
+talosctl -n <node-ip> upgrade --image ghcr.io/siderolabs/talos:v1.13.0
+
+# Retrieve kubeconfig
+talosctl -n <node-ip> kubeconfig
+```
+
+<Note>
+All `talosctl` commands require the `-n` or `--nodes` flag to specify target node(s), or you can set endpoints in your `talosconfig` file.
+</Note>
+
+## Comparison with Traditional Linux
+
+| Feature | Traditional Linux | Talos Linux |
+|---------|-------------------|-------------|
+| Shell access | SSH, local console | None |
+| Package manager | apt, yum, etc. | None |
+| Management | Manual or config management tools | API-driven |
+| System updates | In-place package updates | Atomic OS image replacement |
+| Configuration | Mutable files | Immutable, API-applied |
+| Attack surface | Large (many services, users) | Minimal (API only) |
+| Purpose | General purpose | Kubernetes only |
+
+## Next Steps
+
+Ready to get started with Talos Linux?
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Create your first Talos cluster in minutes using Docker.
+  </Card>
+  
+  <Card title="Installation" icon="download" href="/installation">
+    Install talosctl on your local machine to manage Talos clusters.
+  </Card>
+</CardGroup>
+
+## Community and Support
+
+Join the Talos Linux community:
+
+- **GitHub Discussions**: Questions, bugs, and feature requests at [github.com/siderolabs/talos/discussions](https://github.com/siderolabs/talos/discussions)
+- **Slack**: Join the [Talos Community Slack](https://taloscommunity.slack.com/) via [inviter.co](https://inviter.co/sidero-labs-community)
+- **Twitter**: Follow [@SideroLabs](https://twitter.com/SideroLabs) for updates
+- **Documentation**: Comprehensive docs at [docs.siderolabs.com/talos](https://docs.siderolabs.com/talos)
+
+<Note>
+Talos Linux is open source and licensed under the Mozilla Public License v2.0. View the source code on [GitHub](https://github.com/siderolabs/talos).
+</Note>

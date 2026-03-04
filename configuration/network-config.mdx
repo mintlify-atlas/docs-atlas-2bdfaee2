@@ -1,0 +1,432 @@
+---
+title: Network Configuration
+description: Network configuration for Talos Linux including interfaces, routes, and DNS
+---
+
+Talos Linux uses multi-document network configuration for defining network interfaces, routes, DNS resolution, and other network settings. Network configuration is separate from the main machine configuration document.
+
+<Note>
+The legacy `machine.network` field is deprecated. Use the multi-document configuration types instead: `NetworkDeviceConfig`, `ResolverConfig`, `StaticHostConfig`, and `KubeSpanConfig`.
+</Note>
+
+## Network Device Configuration
+
+Network devices are configured using separate `NetworkDeviceConfig` documents:
+
+```yaml
+---
+version: v1alpha1
+kind: NetworkDeviceConfig
+name: eth0
+addresses:
+  - 192.168.1.100/24
+routes:
+  - network: 0.0.0.0/0
+    gateway: 192.168.1.1
+```
+
+### Device Selection
+
+Devices can be selected by interface name or by device selector:
+
+<ParamField path="name" type="string">
+  The interface name (e.g., `eth0`, `enp0s3`).
+</ParamField>
+
+<ParamField path="deviceSelector" type="object">
+  Select device by hardware attributes instead of interface name.
+</ParamField>
+
+```yaml
+kind: NetworkDeviceConfig
+deviceSelector:
+  busPath: /pci0000:00/0000:00:1f.6
+  hardwareAddress: 00:50:56:*
+```
+
+### IP Addresses
+
+<ParamField path="addresses" type="array">
+  Static IP addresses to assign to the interface in CIDR notation.
+</ParamField>
+
+```yaml
+addresses:
+  - 192.168.1.100/24
+  - 2001:db8::100/64
+```
+
+### DHCP Configuration
+
+<ParamField path="dhcp" type="boolean">
+  Enable DHCP for IPv4 address assignment.
+</ParamField>
+
+<ParamField path="dhcpOptions" type="object">
+  DHCP client options.
+</ParamField>
+
+```yaml
+kind: NetworkDeviceConfig
+name: eth0
+dhcp: true
+dhcpOptions:
+  routeMetric: 100
+  ipv4: true
+  ipv6: false
+```
+
+#### DHCP Options
+
+<ParamField path="dhcpOptions.routeMetric" type="number">
+  Metric for DHCP routes.
+</ParamField>
+
+<ParamField path="dhcpOptions.ipv4" type="boolean" default="true">
+  Enable DHCPv4.
+</ParamField>
+
+<ParamField path="dhcpOptions.ipv6" type="boolean" default="false">
+  Enable DHCPv6.
+</ParamField>
+
+<ParamField path="dhcpOptions.duidv6" type="string">
+  DHCPv6 unique identifier.
+</ParamField>
+
+### Routes
+
+<ParamField path="routes" type="array">
+  Static routes for this interface.
+</ParamField>
+
+```yaml
+routes:
+  - network: 0.0.0.0/0
+    gateway: 192.168.1.1
+    metric: 100
+  - network: 10.0.0.0/8
+    gateway: 192.168.1.254
+```
+
+#### Route Options
+
+<ParamField path="routes[].network" type="string" required>
+  Destination network in CIDR notation.
+</ParamField>
+
+<ParamField path="routes[].gateway" type="string">
+  Gateway IP address.
+</ParamField>
+
+<ParamField path="routes[].source" type="string">
+  Source IP address for the route.
+</ParamField>
+
+<ParamField path="routes[].metric" type="number">
+  Route metric/priority.
+</ParamField>
+
+### VLANs
+
+<ParamField path="vlans" type="array">
+  VLAN sub-interfaces.
+</ParamField>
+
+```yaml
+kind: NetworkDeviceConfig
+name: eth0
+vlans:
+  - vlanId: 100
+    addresses:
+      - 10.0.100.10/24
+    routes:
+      - network: 10.0.0.0/8
+        gateway: 10.0.100.1
+```
+
+### Bonding
+
+Create bonded interfaces:
+
+```yaml
+kind: NetworkDeviceConfig
+name: bond0
+bond:
+  mode: 802.3ad
+  interfaces:
+    - eth0
+    - eth1
+  lacpRate: fast
+  xmitHashPolicy: layer3+4
+addresses:
+  - 192.168.1.100/24
+```
+
+#### Bond Options
+
+<ParamField path="bond.mode" type="string" required>
+  Bonding mode: `balance-rr`, `active-backup`, `balance-xor`, `broadcast`, `802.3ad`, `balance-tlb`, `balance-alb`.
+</ParamField>
+
+<ParamField path="bond.interfaces" type="array" required>
+  List of interfaces to bond.
+</ParamField>
+
+<ParamField path="bond.lacpRate" type="string">
+  LACP rate: `slow` or `fast`.
+</ParamField>
+
+<ParamField path="bond.xmitHashPolicy" type="string">
+  Transmit hash policy for load balancing.
+</ParamField>
+
+### Bridge
+
+Create bridge interfaces:
+
+```yaml
+kind: NetworkDeviceConfig
+name: br0
+bridge:
+  stp:
+    enabled: true
+  interfaces:
+    - eth0
+    - eth1
+addresses:
+  - 192.168.1.100/24
+```
+
+<ParamField path="bridge.interfaces" type="array" required>
+  List of interfaces to add to the bridge.
+</ParamField>
+
+<ParamField path="bridge.stp.enabled" type="boolean" default="false">
+  Enable Spanning Tree Protocol.
+</ParamField>
+
+### Wireguard
+
+Configure WireGuard VPN:
+
+```yaml
+kind: NetworkDeviceConfig
+name: wg0
+wireguard:
+  privateKey: <base64-private-key>
+  listenPort: 51820
+  peers:
+    - publicKey: <peer-public-key>
+      endpoint: 192.168.1.200:51820
+      allowedIPs:
+        - 10.10.0.0/24
+addresses:
+  - 10.10.0.1/24
+```
+
+## DNS Resolution
+
+Configure DNS resolvers using the `ResolverConfig` document:
+
+```yaml
+---
+version: v1alpha1
+kind: ResolverConfig
+nameservers:
+  - 1.1.1.1
+  - 8.8.8.8
+searchDomains:
+  - example.com
+  - cluster.local
+```
+
+<ParamField path="nameservers" type="array" required>
+  List of DNS server IP addresses.
+</ParamField>
+
+<ParamField path="searchDomains" type="array">
+  DNS search domains.
+</ParamField>
+
+## Static Host Entries
+
+Define static hostname to IP mappings:
+
+```yaml
+---
+version: v1alpha1
+kind: StaticHostConfig
+hosts:
+  - hostname: control-plane-1
+    ip: 192.168.1.10
+  - hostname: control-plane-2  
+    ip: 192.168.1.11
+```
+
+<ParamField path="hosts" type="array" required>
+  List of hostname to IP address mappings.
+</ParamField>
+
+## Hostname Configuration
+
+Set the machine hostname:
+
+```yaml
+---
+version: v1alpha1
+kind: HostnameConfig
+hostname: node-1
+```
+
+<ParamField path="hostname" type="string" required>
+  The hostname for the machine.
+</ParamField>
+
+## Time Sync Configuration
+
+Configure NTP servers:
+
+```yaml
+---
+version: v1alpha1
+kind: TimeSyncConfig
+servers:
+  - time.cloudflare.com
+  - pool.ntp.org
+bootTimeout: 5m
+```
+
+<ParamField path="servers" type="array">
+  NTP server addresses. Can also specify PTP devices like `/dev/ptp0`.
+</ParamField>
+
+<ParamField path="bootTimeout" type="duration" default="infinity">
+  Timeout for time sync during boot. Set to `infinity` to wait forever.
+</ParamField>
+
+## KubeSpan
+
+KubeSpan provides encrypted peer-to-peer mesh network:
+
+```yaml
+---
+version: v1alpha1
+kind: KubeSpanConfig
+enabled: true
+advertiseKubernetesNetworks: true
+filters:
+  endpoints:
+    - 0.0.0.0/0
+    - ::/0
+```
+
+<ParamField path="enabled" type="boolean" required>
+  Enable KubeSpan.
+</ParamField>
+
+<ParamField path="advertiseKubernetesNetworks" type="boolean" default="false">
+  Advertise Kubernetes pod/service networks over KubeSpan.
+</ParamField>
+
+<ParamField path="filters.endpoints" type="array">
+  Filter endpoints by CIDR.
+</ParamField>
+
+## Complete Example: Dual Stack with Bonding
+
+```yaml
+---
+version: v1alpha1
+kind: NetworkDeviceConfig
+name: bond0
+bond:
+  mode: 802.3ad
+  interfaces:
+    - eth0
+    - eth1
+  lacpRate: fast
+  xmitHashPolicy: layer3+4
+addresses:
+  - 192.168.1.100/24
+  - 2001:db8::100/64
+routes:
+  - network: 0.0.0.0/0
+    gateway: 192.168.1.1
+  - network: ::/0
+    gateway: 2001:db8::1
+mtu: 9000
+---
+version: v1alpha1
+kind: NetworkDeviceConfig
+name: bond0.100
+vlanId: 100
+addresses:
+  - 10.0.100.10/24
+---
+version: v1alpha1
+kind: ResolverConfig
+nameservers:
+  - 1.1.1.1
+  - 2606:4700:4700::1111
+searchDomains:
+  - cluster.local
+---
+version: v1alpha1
+kind: HostnameConfig
+hostname: control-plane-1
+---
+version: v1alpha1
+kind: TimeSyncConfig
+servers:
+  - time.cloudflare.com
+```
+
+## Network Configuration Tips
+
+### Interface Naming
+
+<Note>
+Interface names in Linux can change between boots. Use `deviceSelector` for stable configuration based on hardware attributes like MAC address or PCI bus path.
+</Note>
+
+### MTU Settings
+
+<ParamField path="mtu" type="number">
+  Maximum transmission unit for the interface. Common values: `1500` (default), `9000` (jumbo frames).
+</ParamField>
+
+```yaml
+mtu: 9000
+```
+
+### Ignoring Interfaces
+
+<ParamField path="ignore" type="boolean">
+  Ignore this interface completely. Useful for preventing Talos from managing certain interfaces.
+</ParamField>
+
+```yaml
+kind: NetworkDeviceConfig
+name: eth2
+ignore: true
+```
+
+### Virtual IPs
+
+For high availability control planes, configure a virtual IP:
+
+```yaml
+kind: NetworkDeviceConfig
+name: eth0
+vip:
+  ip: 192.168.1.10
+  equinixMetal:
+    apiToken: <token>
+  hcloud:
+    apiToken: <token>
+```
+
+<Warning>
+VIP configuration is cloud-provider specific. Check the platform documentation for supported VIP methods.
+</Warning>

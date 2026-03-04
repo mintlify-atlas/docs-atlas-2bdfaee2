@@ -1,80 +1,419 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart Guide
+description: Create your first Talos Linux cluster in minutes using Docker with this step-by-step guide.
 ---
 
-## Get started in three steps
+This quickstart guide will walk you through creating a local Talos Linux cluster using Docker. In just a few minutes, you'll have a fully functional Kubernetes cluster running on your local machine.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+Before you begin, ensure you have the following installed:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+<CardGroup cols={3}>
+  <Card title="Docker" icon="docker">
+    Docker Desktop or Docker Engine running on your machine
+  </Card>
+  
+  <Card title="talosctl" icon="terminal">
+    The Talos CLI tool (see [Installation](/installation))
+  </Card>
+  
+  <Card title="kubectl" icon="dharmachakra">
+    Kubernetes CLI for cluster interaction
+  </Card>
 </CardGroup>
 
+<Warning>
+The Docker-based cluster is intended for testing and development only. For production deployments, use bare metal, virtual machines, or cloud platforms.
+</Warning>
+
+## Create Your First Cluster
+
+Let's create a local Talos cluster with the default configuration.
+
+<Steps>
+  <Step title="Create the cluster">
+    Run the following command to create a Docker-based Talos cluster:
+
+    ```bash
+    talosctl cluster create
+    ```
+
+    This command will:
+    - Create a Docker network for the cluster
+    - Launch container nodes (1 control plane, 0 workers by default)
+    - Generate machine configurations
+    - Apply configurations to nodes
+    - Save the Talos configuration to `~/.talos/config`
+
+    <Accordion title="Sample output">
+      ```
+      validating CIDR and reserving IPs
+      generating PKI and tokens
+      creating network talos-default
+      creating control plane nodes
+      creating worker nodes
+      waiting for API
+      bootstrapping cluster
+      waiting for etcd to be healthy: OK
+      waiting for etcd members to be consistent across nodes: OK
+      waiting for etcd members to be in sync: OK
+      waiting for all nodes to finish boot sequence: OK
+      ```
+    </Accordion>
+
+    <Note>
+    The cluster creation process typically takes 2-3 minutes. Talos will automatically configure networking, bootstrap etcd, and initialize Kubernetes.
+    </Note>
+  </Step>
+
+  <Step title="Customize cluster configuration (optional)">
+    You can customize the cluster with additional flags:
+
+    ```bash
+    # Create cluster with workers
+    talosctl cluster create --workers 2
+
+    # Specify control plane count
+    talosctl cluster create --controlplanes 3 --workers 2
+
+    # Custom resource allocation
+    talosctl cluster create \
+      --cpus-controlplanes 2.0 \
+      --memory-controlplanes 4096 \
+      --cpus-workers 4.0 \
+      --memory-workers 8192
+
+    # Specify Kubernetes version
+    talosctl cluster create --kubernetes-version 1.32.0
+
+    # Custom cluster name
+    talosctl cluster create --name my-cluster
+    ```
+
+    <Accordion title="Common flags">
+      | Flag | Description | Default |
+      |------|-------------|---------|
+      | `--workers` | Number of worker nodes | 0 |
+      | `--controlplanes` | Number of control plane nodes | 1 |
+      | `--cpus-controlplanes` | CPU allocation for control planes | 2.0 |
+      | `--memory-controlplanes` | Memory for control planes (bytes) | 2GB |
+      | `--cpus-workers` | CPU allocation for workers | 2.0 |
+      | `--memory-workers` | Memory for workers (bytes) | 2GB |
+      | `--kubernetes-version` | Kubernetes version to install | Latest stable |
+      | `--name` | Cluster name | talos-default |
+      | `--image` | Talos container image | Latest release |
+    </Accordion>
+  </Step>
+
+  <Step title="Bootstrap the cluster">
+    After the cluster is created, bootstrap etcd to initialize Kubernetes:
+
+    ```bash
+    talosctl bootstrap
+    ```
+
+    <Note>
+    The `bootstrap` command initializes the etcd cluster on the control plane node. This step is automatically performed by `talosctl cluster create`, but you can run it manually if needed.
+    </Note>
+
+    The bootstrap process:
+    - Initializes a single-node etcd cluster
+    - Configures etcd to accept additional members
+    - Enables other control plane nodes to join
+  </Step>
+
+  <Step title="Verify cluster health">
+    Check that your cluster is healthy:
+
+    ```bash
+    talosctl health
+    ```
+
+    Expected output:
+    ```
+    waiting for etcd to be healthy: OK
+    waiting for etcd members to be consistent across nodes: OK  
+    waiting for etcd members to be in sync: OK
+    waiting for all nodes to finish boot sequence: OK
+    ```
+
+    You can also check individual components:
+
+    <CodeGroup>
+      ```bash Version
+      talosctl version
+      ```
+
+      ```bash Cluster info
+      talosctl cluster show
+      ```
+
+      ```bash Node status
+      talosctl get members
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Retrieve the kubeconfig">
+    Get the Kubernetes configuration to interact with your cluster:
+
+    ```bash
+    talosctl kubeconfig
+    ```
+
+    This command:
+    - Downloads the admin kubeconfig from the control plane
+    - Merges it with your existing `~/.kube/config` (by default)
+    - Sets the new cluster as the current context
+
+    <Accordion title="Kubeconfig options">
+      ```bash
+      # Save to a specific location (no merge)
+      talosctl kubeconfig ./kubeconfig
+
+      # Output to stdout
+      talosctl kubeconfig -
+
+      # Force overwrite existing config
+      talosctl kubeconfig --force
+
+      # Merge without prompting
+      talosctl kubeconfig --merge --force
+      ```
+    </Accordion>
+  </Step>
+
+  <Step title="Access your cluster with kubectl">
+    Verify Kubernetes is running:
+
+    ```bash
+    kubectl get nodes
+    ```
+
+    Expected output:
+    ```
+    NAME                     STATUS   ROLES           AGE   VERSION
+    talos-default-controlplane-1   Ready    control-plane   2m    v1.32.0
+    ```
+
+    Check system pods:
+
+    ```bash
+    kubectl get pods -A
+    ```
+
+    You should see pods in the `kube-system` namespace running core Kubernetes components.
+  </Step>
+</Steps>
+
+## What Just Happened?
+
+When you ran `talosctl cluster create`, the following occurred:
+
+<AccordionGroup>
+  <Accordion title="Network Setup">
+    - Created a Docker network named `talos-default`
+    - Allocated a subnet (default: `10.5.0.0/24`)
+    - Reserved IP addresses for nodes and the Kubernetes API endpoint
+  </Accordion>
+
+  <Accordion title="PKI Generation">
+    - Generated certificates for mutual TLS authentication
+    - Created service account tokens
+    - Generated Kubernetes PKI materials
+    - Saved credentials to `~/.talos/config`
+  </Accordion>
+
+  <Accordion title="Node Provisioning">
+    - Pulled the Talos container image
+    - Created Docker containers for each node
+    - Applied machine configurations via the API
+    - Configured control plane and worker roles
+  </Accordion>
+
+  <Accordion title="Cluster Bootstrap">
+    - Bootstrapped etcd on the first control plane node
+    - Initialized the Kubernetes control plane
+    - Started kubelet on all nodes
+    - Deployed core Kubernetes components
+  </Accordion>
+</AccordionGroup>
+
+## Managing Your Cluster
+
+Now that your cluster is running, explore common management tasks:
+
+### View Cluster Information
+
+```bash
+# Show cluster details
+talosctl cluster show
+
+# List cluster nodes
+talosctl get members
+
+# Check node resources
+talosctl -n <node-ip> get nodes
+```
+
+### View Logs
+
+```bash
+# Kubelet logs
+talosctl -n <node-ip> logs kubelet
+
+# Kernel logs
+talosctl -n <node-ip> dmesg
+
+# Service logs
+talosctl -n <node-ip> logs etcd
+```
+
+### Interactive Dashboard
+
+```bash
+# Launch the Talos dashboard
+talosctl dashboard
+```
+
+The dashboard provides real-time monitoring of your cluster including CPU, memory, network, and process information.
+
+### Node Operations
+
+<CodeGroup>
+  ```bash Reboot
+  talosctl -n <node-ip> reboot
+  ```
+
+  ```bash Shutdown
+  talosctl -n <node-ip> shutdown
+  ```
+
+  ```bash Get config
+  talosctl -n <node-ip> get machineconfig
+  ```
+</CodeGroup>
+
+## Deploy a Sample Application
+
+Test your cluster by deploying a simple application:
+
+```bash
+# Create a deployment
+kubectl create deployment nginx --image=nginx
+
+# Expose it as a service
+kubectl expose deployment nginx --port=80 --type=NodePort
+
+# Get the service
+kubectl get svc nginx
+```
+
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+For Docker-based clusters, you'll need to use port forwarding or configure exposed ports to access services from your host machine.
 </Note>
+
+## Cleaning Up
+
+When you're done, destroy the cluster:
+
+```bash
+talosctl cluster destroy
+```
+
+This command:
+- Stops and removes all Docker containers
+- Deletes the Docker network
+- Cleans up cluster state files
+
+<Warning>
+This operation is irreversible. All data in the cluster will be lost. Make sure to back up any important data before destroying the cluster.
+</Warning>
+
+You can optionally preserve the cluster state:
+
+```bash
+# Keep cluster state for later restoration
+talosctl cluster destroy --keep-state
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Cluster creation fails with network errors">
+    Ensure Docker is running and has network access. Check that the default subnet doesn't conflict with existing networks:
+
+    ```bash
+    # Use a custom subnet
+    talosctl cluster create --subnet 10.10.0.0/24
+    ```
+  </Accordion>
+
+  <Accordion title="Nodes stuck in 'NotReady' state">
+    Check node logs for issues:
+
+    ```bash
+    talosctl -n <node-ip> logs kubelet
+    ```
+
+    Verify network connectivity between nodes:
+
+    ```bash
+    talosctl -n <node-ip> get addresses
+    ```
+  </Accordion>
+
+  <Accordion title="Bootstrap command fails">
+    Ensure etcd service is running:
+
+    ```bash
+    talosctl -n <control-plane-ip> service etcd
+    ```
+
+    If the cluster was already bootstrapped, you'll see an error. You only need to bootstrap once.
+  </Accordion>
+
+  <Accordion title="Cannot access cluster with kubectl">
+    Verify the kubeconfig was retrieved correctly:
+
+    ```bash
+    kubectl config current-context
+    ```
+
+    If needed, re-fetch the kubeconfig:
+
+    ```bash
+    talosctl kubeconfig --force
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+Congratulations! You've successfully created your first Talos Linux cluster. Here's what to explore next:
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/configuration/overview">
+    Learn how to customize machine configurations and cluster settings.
+  </Card>
+  
+  <Card title="Production Deployment" icon="server" href="/deployment/platforms">
+    Deploy Talos on bare metal, VMs, or cloud platforms for production use.
+  </Card>
+  
+  <Card title="Networking" icon="network-wired" href="/configuration/network-config">
+    Configure CNI, load balancers, and network policies.
+  </Card>
+  
+  <Card title="Storage" icon="hard-drive" href="/configuration/storage-config">
+    Set up persistent storage for your workloads.
+  </Card>
+</CardGroup>
+
+## Additional Resources
+
+- **Talos CLI Reference**: Complete `talosctl` command documentation
+- **Machine Configuration**: Detailed guide on machine config options
+- **Cluster Management**: Advanced cluster operations and maintenance
+- **Security**: Hardening and security best practices

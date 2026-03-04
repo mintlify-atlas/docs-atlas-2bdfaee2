@@ -1,0 +1,1083 @@
+---
+title: MachineService API
+description: Complete reference for Talos MachineService gRPC API methods
+---
+
+## Overview
+
+The MachineService provides the primary API for managing individual Talos nodes. It includes methods for configuration, lifecycle management, monitoring, and file operations.
+
+```protobuf
+service MachineService {
+  rpc ApplyConfiguration(ApplyConfigurationRequest) returns (ApplyConfigurationResponse);
+  rpc Bootstrap(BootstrapRequest) returns (BootstrapResponse);
+  rpc Containers(ContainersRequest) returns (ContainersResponse);
+  rpc Copy(CopyRequest) returns (stream common.Data);
+  rpc Reboot(RebootRequest) returns (RebootResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+  rpc Upgrade(UpgradeRequest) returns (UpgradeResponse);
+  // ... and many more
+}
+```
+
+## Configuration Management
+
+### ApplyConfiguration
+
+Applies a new machine configuration to the node.
+
+<ParamField path="data" type="bytes" required>
+  Complete machine configuration as YAML bytes
+</ParamField>
+
+<ParamField path="mode" type="Mode" default="AUTO">
+  Application mode:
+  - `REBOOT`: Apply config and reboot immediately
+  - `AUTO`: Automatically determine if reboot is needed
+  - `NO_REBOOT`: Apply without rebooting (may require manual reboot)
+  - `STAGED`: Stage configuration for next reboot
+  - `TRY`: Try configuration with automatic rollback
+</ParamField>
+
+<ParamField path="dry_run" type="bool" default="false">
+  Validate configuration without applying
+</ParamField>
+
+<ParamField path="try_mode_timeout" type="Duration">
+  Timeout for TRY mode before automatic rollback (default: 60s)
+</ParamField>
+
+**Response:**
+
+<ResponseField name="metadata" type="Metadata">
+  Standard response metadata with hostname
+</ResponseField>
+
+<ResponseField name="warnings" type="string[]">
+  Configuration validation warnings
+</ResponseField>
+
+<ResponseField name="mode" type="Mode">
+  Actual mode used for applying configuration
+</ResponseField>
+
+<ResponseField name="mode_details" type="string">
+  Human-readable explanation of the mode selection
+</ResponseField>
+
+**Example:**
+
+```go
+import (
+    "github.com/siderolabs/talos/pkg/machinery/api/machine"
+)
+
+configData, _ := os.ReadFile("machine-config.yaml")
+
+resp, err := client.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{
+    Data: configData,
+    Mode: machine.ApplyConfigurationRequest_AUTO,
+})
+
+for _, msg := range resp.Messages {
+    fmt.Printf("Applied on %s with mode %s\n", msg.Metadata.Hostname, msg.Mode)
+    for _, warning := range msg.Warnings {
+        fmt.Printf("Warning: %s\n", warning)
+    }
+}
+```
+
+## System Lifecycle
+
+### Reboot
+
+Reboots the node.
+
+<ParamField path="mode" type="RebootMode" default="DEFAULT">
+  Reboot mode:
+  - `DEFAULT`: Graceful reboot
+  - `POWERCYCLE`: Force power cycle
+  - `FORCE`: Skip graceful shutdown
+</ParamField>
+
+**Response:**
+
+<ResponseField name="metadata" type="Metadata">
+  Standard response metadata
+</ResponseField>
+
+<ResponseField name="actor_id" type="string">
+  ID of the request initiator
+</ResponseField>
+
+**Example:**
+
+```go
+resp, err := client.Reboot(ctx, &machine.RebootRequest{
+    Mode: machine.RebootRequest_DEFAULT,
+})
+```
+
+### Shutdown
+
+Shuts down the node.
+
+<ParamField path="force" type="bool" default="false">
+  Skip cordoning and draining before shutdown
+</ParamField>
+
+**Response:**
+
+<ResponseField name="metadata" type="Metadata">
+  Standard response metadata
+</ResponseField>
+
+<ResponseField name="actor_id" type="string">
+  ID of the request initiator
+</ResponseField>
+
+**Example:**
+
+```bash
+talosctl shutdown -n 10.0.0.1
+```
+
+### Upgrade
+
+Upgrades Talos to a new version.
+
+<ParamField path="image" type="string" required>
+  Talos installer image (e.g., `ghcr.io/siderolabs/installer:v1.7.0`)
+</ParamField>
+
+<ParamField path="preserve" type="bool" default="false">
+  Preserve ephemeral data (not recommended)
+</ParamField>
+
+<ParamField path="stage" type="bool" default="false">
+  Stage upgrade for next reboot
+</ParamField>
+
+<ParamField path="force" type="bool" default="false">
+  Force upgrade even if version check fails
+</ParamField>
+
+<ParamField path="reboot_mode" type="RebootMode" default="DEFAULT">
+  Reboot mode after upgrade
+</ParamField>
+
+**Response:**
+
+<ResponseField name="metadata" type="Metadata">
+  Standard response metadata
+</ResponseField>
+
+<ResponseField name="ack" type="string">
+  Acknowledgment message
+</ResponseField>
+
+<ResponseField name="actor_id" type="string">
+  ID of the request initiator
+</ResponseField>
+
+**Example:**
+
+```go
+resp, err := client.Upgrade(ctx, &machine.UpgradeRequest{
+    Image: "ghcr.io/siderolabs/installer:v1.7.0",
+    Stage: false,
+    Force: false,
+})
+```
+
+### Reset
+
+Resets the node to a clean state.
+
+<ParamField path="graceful" type="bool" default="false">
+  Leave etcd gracefully and run pre-reset checks
+</ParamField>
+
+<ParamField path="reboot" type="bool" default="true">
+  Reboot after reset (false = halt)
+</ParamField>
+
+<ParamField path="system_partitions_to_wipe" type="ResetPartitionSpec[]">
+  Specific system partitions to wipe. Empty = wipe all
+</ParamField>
+
+<ParamField path="user_disks_to_wipe" type="string[]">
+  Block devices to wipe (e.g., `/dev/sdb`)
+</ParamField>
+
+<ParamField path="mode" type="WipeMode" default="ALL">
+  Wipe mode:
+  - `ALL`: Wipe all disks
+  - `SYSTEM_DISK`: Only system disk
+  - `USER_DISKS`: Only user disks
+</ParamField>
+
+**Example:**
+
+```bash
+# Reset with etcd leave
+talosctl reset --graceful -n 10.0.0.1
+
+# Reset and wipe specific disk
+talosctl reset --user-disks-to-wipe /dev/sdb -n 10.0.0.1
+```
+
+## Monitoring & Stats
+
+### Version
+
+Returns Talos version information.
+
+**Request:** Empty
+
+**Response:**
+
+<ResponseField name="metadata" type="Metadata">
+  Standard response metadata
+</ResponseField>
+
+<ResponseField name="version" type="VersionInfo">
+  - `tag`: Version tag (e.g., `v1.7.0`)
+  - `sha`: Git commit SHA
+  - `built`: Build timestamp
+  - `go_version`: Go compiler version
+  - `os`: Operating system
+  - `arch`: Architecture
+</ResponseField>
+
+<ResponseField name="platform" type="PlatformInfo">
+  - `name`: Platform name (e.g., `aws`, `metal`)
+  - `mode`: Platform mode (e.g., `cloud`, `container`)
+</ResponseField>
+
+<ResponseField name="features" type="FeaturesInfo">
+  - `rbac`: Whether RBAC is enabled
+</ResponseField>
+
+**Example:**
+
+```go
+resp, err := client.Version(ctx)
+for _, msg := range resp.Messages {
+    fmt.Printf("%s: Talos %s (%s)\n", 
+        msg.Metadata.Hostname,
+        msg.Version.Tag,
+        msg.Platform.Name,
+    )
+}
+```
+
+### Memory
+
+Returns memory statistics.
+
+**Request:** Empty
+
+**Response:**
+
+<ResponseField name="meminfo" type="MemInfo">
+  Detailed memory statistics including:
+  - `memtotal`: Total memory in bytes
+  - `memfree`: Free memory
+  - `memavailable`: Available memory
+  - `buffers`: Buffer cache
+  - `cached`: Page cache
+  - `swaptotal`: Total swap
+  - `swapfree`: Free swap
+  - And 40+ more fields
+</ResponseField>
+
+**Example:**
+
+```bash
+talosctl memory -n 10.0.0.1
+```
+
+### Processes
+
+Lists running processes.
+
+**Request:** Empty
+
+**Response:**
+
+<ResponseField name="processes" type="ProcessInfo[]">
+  Array of processes with:
+  - `pid`: Process ID
+  - `ppid`: Parent process ID
+  - `state`: Process state (R, S, D, Z, T)
+  - `threads`: Number of threads
+  - `cpu_time`: CPU time in seconds
+  - `virtual_memory`: Virtual memory size
+  - `resident_memory`: Resident memory size
+  - `command`: Command name
+  - `executable`: Executable path
+  - `args`: Command arguments
+</ResponseField>
+
+**Example:**
+
+```go
+resp, err := client.Processes(ctx)
+for _, msg := range resp.Messages {
+    for _, proc := range msg.Processes {
+        fmt.Printf("PID %d: %s\n", proc.Pid, proc.Command)
+    }
+}
+```
+
+### SystemStat
+
+Returns system statistics (CPU, IRQ, context switches).
+
+**Request:** Empty
+
+**Response:**
+
+<ResponseField name="boot_time" type="uint64">
+  System boot time (Unix timestamp)
+</ResponseField>
+
+<ResponseField name="cpu_total" type="CPUStat">
+  Aggregated CPU statistics
+</ResponseField>
+
+<ResponseField name="cpu" type="CPUStat[]">
+  Per-CPU statistics with:
+  - `user`: User mode time
+  - `system`: Kernel mode time
+  - `idle`: Idle time
+  - `iowait`: IO wait time
+  - `irq`: IRQ time
+</ResponseField>
+
+<ResponseField name="context_switches" type="uint64">
+  Total context switches
+</ResponseField>
+
+<ResponseField name="process_created" type="uint64">
+  Total processes created
+</ResponseField>
+
+<ResponseField name="process_running" type="uint64">
+  Currently running processes
+</ResponseField>
+
+### LoadAvg
+
+Returns system load averages.
+
+**Response:**
+
+<ResponseField name="load1" type="double">
+  1-minute load average
+</ResponseField>
+
+<ResponseField name="load5" type="double">
+  5-minute load average
+</ResponseField>
+
+<ResponseField name="load15" type="double">
+  15-minute load average
+</ResponseField>
+
+### NetworkDeviceStats
+
+Returns network interface statistics.
+
+**Response:**
+
+<ResponseField name="total" type="NetDev">
+  Aggregated statistics across all interfaces
+</ResponseField>
+
+<ResponseField name="devices" type="NetDev[]">
+  Per-interface statistics with:
+  - `name`: Interface name
+  - `rx_bytes`: Received bytes
+  - `rx_packets`: Received packets
+  - `rx_errors`: Receive errors
+  - `tx_bytes`: Transmitted bytes
+  - `tx_packets`: Transmitted packets
+  - `tx_errors`: Transmit errors
+</ResponseField>
+
+### DiskStats
+
+Returns disk I/O statistics.
+
+**Response:**
+
+<ResponseField name="total" type="DiskStat">
+  Aggregated disk statistics
+</ResponseField>
+
+<ResponseField name="devices" type="DiskStat[]">
+  Per-disk statistics with:
+  - `name`: Device name
+  - `read_completed`: Completed reads
+  - `read_sectors`: Sectors read
+  - `read_time_ms`: Time spent reading
+  - `write_completed`: Completed writes
+  - `write_sectors`: Sectors written
+  - `write_time_ms`: Time spent writing
+  - `io_in_progress`: I/Os in progress
+</ResponseField>
+
+## Container Management
+
+### Containers
+
+Lists containers running on the node.
+
+<ParamField path="namespace" type="string" default="k8s.io">
+  Containerd namespace
+</ParamField>
+
+<ParamField path="driver" type="ContainerDriver" default="CONTAINERD">
+  Container runtime driver: `CONTAINERD` or `CRI`
+</ParamField>
+
+**Response:**
+
+<ResponseField name="containers" type="ContainerInfo[]">
+  Array of containers with:
+  - `namespace`: Container namespace
+  - `id`: Container ID
+  - `image`: Container image
+  - `pid`: Process ID
+  - `status`: Container status
+  - `pod_id`: Kubernetes pod ID (if applicable)
+  - `name`: Container name
+</ResponseField>
+
+**Example:**
+
+```bash
+# List Kubernetes containers
+talosctl containers -n 10.0.0.1
+
+# List system containers
+talosctl containers -k -n 10.0.0.1
+```
+
+### Stats
+
+Returns container resource usage statistics.
+
+<ParamField path="namespace" type="string" default="k8s.io">
+  Containerd namespace
+</ParamField>
+
+<ParamField path="driver" type="ContainerDriver" default="CONTAINERD">
+  Container runtime driver
+</ParamField>
+
+**Response:**
+
+<ResponseField name="stats" type="Stat[]">
+  Resource usage per container:
+  - `namespace`: Container namespace
+  - `id`: Container ID
+  - `memory_usage`: Memory usage in bytes
+  - `cpu_usage`: CPU usage in nanoseconds
+  - `pod_id`: Pod ID
+  - `name`: Container name
+</ResponseField>
+
+### Restart
+
+Restarts a container.
+
+<ParamField path="namespace" type="string" required>
+  Container namespace
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Container ID
+</ParamField>
+
+<ParamField path="driver" type="ContainerDriver" default="CONTAINERD">
+  Container runtime driver
+</ParamField>
+
+**Example:**
+
+```bash
+talosctl restart kubelet -n 10.0.0.1
+```
+
+## Logs & Events
+
+### Logs
+
+Streams container logs.
+
+<ParamField path="namespace" type="string" required>
+  Container namespace
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Container ID
+</ParamField>
+
+<ParamField path="driver" type="ContainerDriver" default="CONTAINERD">
+  Container runtime driver
+</ParamField>
+
+<ParamField path="follow" type="bool" default="false">
+  Follow log output (stream new logs)
+</ParamField>
+
+<ParamField path="tail_lines" type="int32" default="-1">
+  Number of lines from the end to show (-1 = all)
+</ParamField>
+
+**Response:** Stream of `common.Data` messages containing log data
+
+**Example:**
+
+```go
+stream, err := client.Logs(ctx, &machine.LogsRequest{
+    Namespace: "system",
+    Id:        "kubelet",
+    Follow:    true,
+    TailLines: 100,
+})
+
+for {
+    data, err := stream.Recv()
+    if err == io.EOF {
+        break
+    }
+    fmt.Print(string(data.Bytes))
+}
+```
+
+### Events
+
+Streams system events.
+
+<ParamField path="tail_events" type="int32" default="0">
+  Number of past events to return
+</ParamField>
+
+<ParamField path="tail_id" type="string">
+  Start streaming from this event ID
+</ParamField>
+
+<ParamField path="tail_seconds" type="int32">
+  Return events from the last N seconds
+</ParamField>
+
+<ParamField path="with_actor_id" type="string">
+  Filter events by actor ID
+</ParamField>
+
+**Response:** Stream of `Event` messages
+
+<ResponseField name="data" type="Any">
+  Event data (one of: SequenceEvent, PhaseEvent, TaskEvent, ServiceStateEvent, etc.)
+</ResponseField>
+
+<ResponseField name="id" type="string">
+  Event ID
+</ResponseField>
+
+<ResponseField name="actor_id" type="string">
+  Actor that triggered the event
+</ResponseField>
+
+**Example:**
+
+```bash
+# Stream all events
+talosctl events -n 10.0.0.1
+
+# Show last 10 events
+talosctl events --tail 10 -n 10.0.0.1
+```
+
+### Dmesg
+
+Streams kernel messages.
+
+<ParamField path="follow" type="bool" default="false">
+  Follow kernel messages
+</ParamField>
+
+<ParamField path="tail" type="bool" default="false">
+  Show only recent messages
+</ParamField>
+
+**Response:** Stream of `common.Data` messages
+
+**Example:**
+
+```bash
+talosctl dmesg -f -n 10.0.0.1
+```
+
+## File Operations
+
+### List
+
+Lists files in a directory.
+
+<ParamField path="root" type="string" default="/">
+  Root directory to list
+</ParamField>
+
+<ParamField path="recurse" type="bool" default="false">
+  Recursively list subdirectories
+</ParamField>
+
+<ParamField path="recursion_depth" type="int32" default="0">
+  Maximum recursion depth (0 = unlimited)
+</ParamField>
+
+<ParamField path="types" type="Type[]">
+  Filter by file types: `REGULAR`, `DIRECTORY`, `SYMLINK`
+</ParamField>
+
+**Response:** Stream of `FileInfo` messages
+
+<ResponseField name="name" type="string">
+  Full file path
+</ResponseField>
+
+<ResponseField name="size" type="int64">
+  File size in bytes
+</ResponseField>
+
+<ResponseField name="mode" type="uint32">
+  Unix file mode/permissions
+</ResponseField>
+
+<ResponseField name="modified" type="int64">
+  Last modification time (Unix timestamp)
+</ResponseField>
+
+<ResponseField name="is_dir" type="bool">
+  Whether this is a directory
+</ResponseField>
+
+<ResponseField name="link" type="string">
+  Symlink target (if applicable)
+</ResponseField>
+
+**Example:**
+
+```bash
+talosctl ls /etc -n 10.0.0.1
+talosctl ls -r /var/log -n 10.0.0.1
+```
+
+### Read
+
+Reads a file from the node.
+
+<ParamField path="path" type="string" required>
+  File path to read
+</ParamField>
+
+**Response:** Stream of `common.Data` messages containing file contents
+
+**Example:**
+
+```bash
+talosctl read /etc/os-release -n 10.0.0.1
+```
+
+### Copy
+
+Copies files from the node as a tar.gz archive.
+
+<ParamField path="root_path" type="string" required>
+  File or directory path to copy
+</ParamField>
+
+**Response:** Stream of `common.Data` messages containing tar.gz data
+
+**Example:**
+
+```bash
+talosctl copy /var/log -n 10.0.0.1
+```
+
+## Service Management
+
+### ServiceList
+
+Lists system services.
+
+**Request:** Empty
+
+**Response:**
+
+<ResponseField name="services" type="ServiceInfo[]">
+  Array of services with:
+  - `id`: Service ID
+  - `state`: Current state (Running, Stopped, etc.)
+  - `events`: Service event history
+  - `health`: Service health status
+</ResponseField>
+
+**Example:**
+
+```bash
+talosctl services -n 10.0.0.1
+```
+
+### ServiceStart
+
+Starts a system service.
+
+<ParamField path="id" type="string" required>
+  Service ID
+</ParamField>
+
+**Example:**
+
+```bash
+talosctl service start kubelet -n 10.0.0.1
+```
+
+### ServiceStop
+
+Stops a system service.
+
+<ParamField path="id" type="string" required>
+  Service ID
+</ParamField>
+
+**Example:**
+
+```bash
+talosctl service stop kubelet -n 10.0.0.1
+```
+
+### ServiceRestart
+
+Restarts a system service.
+
+<ParamField path="id" type="string" required>
+  Service ID
+</ParamField>
+
+**Example:**
+
+```bash
+talosctl service restart kubelet -n 10.0.0.1
+```
+
+## etcd Management
+
+### Bootstrap
+
+Bootstraps etcd on a control plane node.
+
+<ParamField path="recover_etcd" type="bool" default="false">
+  Recover etcd from uploaded snapshot
+</ParamField>
+
+<ParamField path="recover_skip_hash_check" type="bool" default="false">
+  Skip hash check when recovering from snapshot
+</ParamField>
+
+**Example:**
+
+```bash
+talosctl bootstrap -n 10.0.0.1
+```
+
+### EtcdMemberList
+
+Lists etcd cluster members.
+
+<ParamField path="query_local" type="bool" default="false">
+  Query only local etcd member
+</ParamField>
+
+**Response:**
+
+<ResponseField name="members" type="EtcdMember[]">
+  Array of etcd members:
+  - `id`: Member ID
+  - `hostname`: Member hostname
+  - `peer_urls`: Peer URLs
+  - `client_urls`: Client URLs
+  - `is_learner`: Whether this is a learner node
+</ResponseField>
+
+**Example:**
+
+```bash
+talosctl etcd members -n 10.0.0.1
+```
+
+### EtcdRemoveMemberByID
+
+Removes an etcd member by ID.
+
+<ParamField path="member_id" type="uint64" required>
+  Member ID to remove
+</ParamField>
+
+**Example:**
+
+```bash
+talosctl etcd remove-member 12345678 -n 10.0.0.1
+```
+
+### EtcdLeaveCluster
+
+Makes the node leave the etcd cluster gracefully.
+
+**Request:** Empty
+
+**Example:**
+
+```bash
+talosctl etcd leave -n 10.0.0.1
+```
+
+### EtcdSnapshot
+
+Creates an etcd snapshot.
+
+**Request:** Empty
+
+**Response:** Stream of `common.Data` containing snapshot data
+
+**Example:**
+
+```bash
+talosctl etcd snapshot etcd.snapshot -n 10.0.0.1
+```
+
+### EtcdRecover
+
+Uploads an etcd snapshot for recovery.
+
+**Request:** Stream of `common.Data` containing snapshot
+
+**Example:**
+
+```bash
+# Upload snapshot, then bootstrap with recovery
+talosctl etcd recover etcd.snapshot -n 10.0.0.1
+talosctl bootstrap --recover-etcd -n 10.0.0.1
+```
+
+### EtcdStatus
+
+Returns etcd member status.
+
+**Request:** Empty
+
+**Response:**
+
+<ResponseField name="member_status" type="EtcdMemberStatus">
+  - `member_id`: Member ID
+  - `protocol_version`: Protocol version
+  - `db_size`: Database size in bytes
+  - `db_size_in_use`: Database size in use
+  - `leader`: Leader member ID
+  - `raft_index`: Raft index
+  - `raft_term`: Raft term
+  - `raft_applied_index`: Applied index
+  - `is_learner`: Learner status
+  - `errors`: Any errors
+</ResponseField>
+
+**Example:**
+
+```bash
+talosctl etcd status -n 10.0.0.1
+```
+
+### EtcdAlarmList
+
+Lists etcd alarms.
+
+**Response:**
+
+<ResponseField name="member_alarms" type="EtcdMemberAlarm[]">
+  Array of alarms:
+  - `member_id`: Member ID
+  - `alarm`: Alarm type (NONE, NOSPACE, CORRUPT)
+</ResponseField>
+
+### EtcdAlarmDisarm
+
+Disarms etcd alarms.
+
+**Request:** Empty
+
+**Example:**
+
+```bash
+talosctl etcd alarm disarm -n 10.0.0.1
+```
+
+### EtcdDefragment
+
+Defragments etcd database.
+
+**Request:** Empty
+
+<Warning>
+  Defragmentation is resource-intensive. Run on one node at a time.
+</Warning>
+
+**Example:**
+
+```bash
+talosctl etcd defrag -n 10.0.0.1
+```
+
+## Advanced Operations
+
+### GenerateClientConfiguration
+
+Generates a new client certificate and talosconfig.
+
+<ParamField path="roles" type="string[]" required>
+  Roles to assign to the certificate (e.g., `["os:admin"]`)
+</ParamField>
+
+<ParamField path="crt_ttl" type="Duration" default="8760h">
+  Certificate TTL (default: 1 year)
+</ParamField>
+
+**Response:**
+
+<ResponseField name="ca" type="bytes">
+  PEM-encoded CA certificate
+</ResponseField>
+
+<ResponseField name="crt" type="bytes">
+  PEM-encoded client certificate
+</ResponseField>
+
+<ResponseField name="key" type="bytes">
+  PEM-encoded client private key
+</ResponseField>
+
+<ResponseField name="talosconfig" type="bytes">
+  Complete talosconfig file content
+</ResponseField>
+
+**Example:**
+
+```bash
+talosctl config new admin.yaml --roles os:admin -n 10.0.0.1
+```
+
+### PacketCapture
+
+Captures network packets.
+
+<ParamField path="interface" type="string" required>
+  Network interface name
+</ParamField>
+
+<ParamField path="promiscuous" type="bool" default="false">
+  Enable promiscuous mode
+</ParamField>
+
+<ParamField path="snap_len" type="uint32" default="65536">
+  Snapshot length in bytes
+</ParamField>
+
+<ParamField path="bpf_filter" type="BPFInstruction[]">
+  BPF filter instructions
+</ParamField>
+
+**Response:** Stream of pcap data
+
+**Example:**
+
+```bash
+talosctl pcap -i eth0 -n 10.0.0.1 > capture.pcap
+```
+
+### Netstat
+
+Provides network connection information.
+
+<ParamField path="filter" type="Filter" default="ALL">
+  Connection filter: `ALL`, `CONNECTED`, `LISTENING`
+</ParamField>
+
+<ParamField path="feature" type="Feature">
+  - `pid`: Include process IDs
+</ParamField>
+
+<ParamField path="l4proto" type="L4proto">
+  Protocol filters: `tcp`, `tcp6`, `udp`, `udp6`, etc.
+</ParamField>
+
+**Response:**
+
+<ResponseField name="connectrecord" type="ConnectRecord[]">
+  Network connections with:
+  - `l4proto`: Protocol (tcp, udp, etc.)
+  - `localip`: Local IP address
+  - `localport`: Local port
+  - `remoteip`: Remote IP address
+  - `remoteport`: Remote port
+  - `state`: Connection state
+  - `process`: Process information (if requested)
+</ResponseField>
+
+**Example:**
+
+```bash
+talosctl netstat -n 10.0.0.1
+```
+
+### Hostname
+
+Returns the node hostname.
+
+**Request:** Empty
+
+**Response:**
+
+<ResponseField name="hostname" type="string">
+  Node hostname
+</ResponseField>
+
+**Example:**
+
+```bash
+talosctl hostname -n 10.0.0.1
+```
+
+### Kubeconfig
+
+Returns the Kubernetes admin kubeconfig.
+
+**Request:** Empty
+
+**Response:** Stream of kubeconfig file data
+
+**Example:**
+
+```bash
+talosctl kubeconfig -n 10.0.0.1
+```
+
+## See Also
+
+- [ClusterService API](/api/cluster-service)
+- [InspectService API](/api/inspect-service)
+- [Common Types](/api/common-types)
+- [API Overview](/api/overview)

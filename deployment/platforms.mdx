@@ -1,0 +1,180 @@
+---
+title: Platform Overview
+description: Overview of supported platforms and deployment options for Talos Linux
+---
+
+Talos Linux is designed to run across a wide variety of platforms, from bare metal servers to cloud providers and local development environments.
+
+## Supported Platforms
+
+Talos supports the following platform types:
+
+### Cloud Platforms
+
+Talos provides native integrations for major cloud providers with automatic metadata discovery and platform-specific optimizations:
+
+- **[AWS](/deployment/aws)** - EC2 instances with IMDS integration
+- **[Google Cloud Platform](/deployment/gcp)** - GCE instances with metadata service support
+- **[Azure](/deployment/azure)** - Virtual Machines with Azure metadata service
+- **DigitalOcean** - Droplets with cloud-init support
+- **Equinix Metal** - Bare metal cloud infrastructure
+- **Hetzner Cloud** - Cloud VMs with metadata service
+- **Scaleway** - Cloud instances
+- **Vultr** - Cloud compute instances
+- **Oracle Cloud** - OCI compute instances
+- **Akamai (Linode)** - Cloud instances
+
+### Bare Metal & On-Premises
+
+- **[Bare Metal](/deployment/bare-metal)** - Physical servers via PXE, ISO, or USB boot
+- **VMware** - vSphere and ESXi environments
+- **OpenStack** - OpenStack compute instances
+- **Proxmox** - Proxmox VE virtual machines
+- **NoCloud** - Generic cloud-init datasource
+
+### Local Development
+
+- **[Docker](/deployment/docker)** - Containerized nodes for local testing
+- **[QEMU](/deployment/kubernetes-in-docker)** - Virtual machines for local clusters
+
+## Platform Modes
+
+Talos operates in different modes depending on the platform:
+
+<CodeGroup>
+```go Metal Mode
+// Bare metal and on-premises deployments
+func (m *Metal) Mode() runtime.Mode {
+    return runtime.ModeMetal
+}
+```
+
+```go Cloud Mode
+// AWS, GCP, Azure and other cloud providers
+func (a *AWS) Mode() runtime.Mode {
+    return runtime.ModeCloud
+}
+```
+
+```go Container Mode
+// Docker and containerized deployments
+func (c *Container) Mode() runtime.Mode {
+    return runtime.ModeContainer
+}
+```
+</CodeGroup>
+
+## Platform Features
+
+### Automatic Configuration Discovery
+
+Cloud platforms automatically discover:
+
+- Network configuration (IP addresses, DNS, routes)
+- Instance metadata (region, zone, instance type)
+- Platform-specific time servers
+- Hostname and external IPs
+
+### Network Configuration
+
+Each platform provides network configuration through its metadata service:
+
+- **AWS** - Uses IMDS (Instance Metadata Service) at `169.254.169.254`
+- **GCP** - Uses metadata server at `metadata.google.internal`
+- **Azure** - Reads configuration from IMDS and ovf-env.xml
+- **Bare Metal** - Network config via kernel parameters or META partition
+
+### Kernel Arguments
+
+Platforms configure appropriate console and boot parameters:
+
+<CodeGroup>
+```bash AWS
+# AWS uses ttyS0 for serial console
+console=tty1 console=ttyS0 net.ifnames=0
+```
+
+```bash GCP
+# GCP disables dashboard and uses ttyS0
+console=ttyS0 net.ifnames=0 talos.dashboard.disabled=1
+```
+
+```bash Azure
+# Azure uses specific serial console settings
+console=ttyS0,115200n8 earlyprintk=ttyS0,115200 rootdelay=300
+```
+
+```bash Bare Metal
+# Metal supports multiple console types
+console=ttyS0 console=tty0  # amd64
+console=ttyAMA0 console=tty0  # arm64
+```
+</CodeGroup>
+
+## Configuration Injection Methods
+
+Talos supports multiple methods for injecting machine configuration:
+
+### HTTP/HTTPS
+Fetch configuration from a URL specified via kernel parameter:
+
+```bash
+talos.config=https://example.com/machine-config.yaml
+```
+
+### Cloud Metadata
+Cloud platforms deliver configuration via user-data:
+
+- **AWS** - EC2 user-data
+- **GCP** - Instance metadata `user-data` attribute
+- **Azure** - Custom data in ovf-env.xml
+
+### ISO/USB
+Boot media can contain embedded configuration:
+
+```bash
+talos.config=metal:iso
+```
+
+### Config Server
+Platform-specific configuration servers:
+
+```bash
+talos.config=https://192.168.1.10:8080/config?uuid=${uuid}
+```
+
+## Choosing a Platform
+
+### For Production
+
+- **Cloud** - Use managed cloud platforms (AWS, GCP, Azure) for automatic scaling and high availability
+- **Bare Metal** - Use physical servers for maximum performance and control
+- **Hybrid** - Combine cloud and on-premises for flexibility
+
+### For Development
+
+- **Docker** - Fastest option for local testing and CI/CD
+- **QEMU** - Full VM experience for testing boot processes
+- **Cloud** - Test in production-like environments
+
+## Next Steps
+
+Choose your deployment platform:
+
+<CardGroup cols={2}>
+  <Card title="Bare Metal" icon="server" href="/deployment/bare-metal">
+    Deploy to physical servers
+  </Card>
+  <Card title="AWS" icon="aws" href="/deployment/aws">
+    Deploy to Amazon EC2
+  </Card>
+  <Card title="GCP" icon="google" href="/deployment/gcp">
+    Deploy to Google Cloud
+  </Card>
+  <Card title="Azure" icon="microsoft" href="/deployment/azure">
+    Deploy to Azure VMs
+  </Card>
+  <Card title="Docker" icon="docker" href="/deployment/docker">
+    Local Docker cluster
+  </Card>
+</CardGroup>

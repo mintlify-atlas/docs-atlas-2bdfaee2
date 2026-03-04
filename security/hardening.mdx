@@ -1,0 +1,706 @@
+---
+title: Security Hardening
+description: Best practices and guidelines for hardening Talos Linux in production
+---
+
+Talos is secure by default, but additional hardening measures can further strengthen your cluster's security posture. This guide covers security best practices for production deployments.
+
+## Infrastructure Security
+
+### Network Isolation
+
+**Segment your network:**
+
+- **Control plane nodes** - Isolated network segment
+- **Worker nodes** - Separate segment from control plane
+- **Management network** - Dedicated network for Talos API access
+
+**Firewall rules:**
+
+```
+# Control plane nodes - allow from anywhere in cluster
+6443/tcp   - Kubernetes API (from workers, admins, load balancer)
+50000/tcp  - Talos API (from admins only)
+2379-2380/tcp - etcd (from control plane nodes only)
+
+# Worker nodes - restrict access
+10250/tcp  - Kubelet API (from control plane only)
+50000/tcp  - Talos API (from admins only)
+
+# All nodes - internal
+4244/tcp   - Cilium health checks (if using Cilium)
+51820/udp  - WireGuard (if using KubeSpan)
+```
+
+<Warning>
+Never expose Talos API (port 50000) or etcd (ports 2379-2380) directly to the internet. Always use VPN or bastion hosts for remote access.
+</Warning>
+
+### Network Policies
+
+Implement strict network policies:
+
+**Deny all by default:**
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: default
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+```
+
+**Allow only required traffic:**
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-specific
+spec:
+  podSelector:
+    matchLabels:
+      app: myapp
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend
+      ports:
+        - protocol: TCP
+          port: 8080
+```
+
+## Certificate Security
+
+### Short-Lived Certificates
+
+Use short certificate validity periods:
+
+```bash
+# Generate 30-day certificates instead of 365-day
+talosctl gen config my-cluster https://10.5.0.2:6443 \
+  --with-secrets secrets.yaml \
+  --cert-ttl 720h \
+  --output-types talosconfig
+```
+
+**Benefits:**
+- Reduces impact of certificate compromise
+- Forces regular credential rotation
+- Limits window for offline attacks
+
+**Trade-offs:**
+- Requires more frequent certificate renewal
+- Need automation for certificate distribution
+
+### CA Key Protection
+
+Protect your CA private keys:
+
+**Storage:**
+- Encrypt CA keys at rest (GPG, age, KMS)
+- Store in secure secret management (Vault, AWS KMS)
+- Use Hardware Security Modules (HSM) for high-security environments
+- Never commit to version control
+
+**Access control:**
+- Limit access to CA keys to essential personnel
+- Use separate keys for different environments (prod, staging)
+- Implement audit logging for CA key usage
+- Consider air-gapped CA for offline signing
+
+**Example: Encrypt secrets bundle with age:**
+
+```bash
+# Generate and encrypt
+talosctl gen secrets | age -e -r <public-key> > secrets.yaml.age
+
+# Decrypt when needed
+age -d -i <private-key> secrets.yaml.age > secrets.yaml
+talosctl gen config cluster https://10.5.0.2:6443 --with-secrets secrets.yaml
+rm secrets.yaml  # Delete plaintext
+```
+
+### Certificate Pinning
+
+Pin expected certificates in monitoring:
+
+```bash
+#!/bin/bash
+# Monitor certificate changes
+EXPECTED_FINGERPRINT="SHA256:abc123..."
+CURRENT=$(echo | openssl s_client -connect 10.5.0.2:50000 2>/dev/null | \
+  openssl x509 -noout -fingerprint -sha256)
+
+if [[ "$CURRENT" != "$EXPECTED_FINGERPRINT" ]]; then
+  echo "ALERT: Certificate fingerprint changed!"
+  # Send alert
+fi
+```
+
+## Access Control Hardening
+
+### Principle of Least Privilege
+
+**Role assignment strategy:**
+
+```
+Team           | Role              | Use Case
+---------------|-------------------|---------------------------
+Platform Team  | os:admin          | Cluster lifecycle only
+SRE Team       | os:operator       | Daily operations
+Dev Team       | os:reader         | Troubleshooting, logs
+Backup System  | os:etcd:backup    | Automated backups
+Monitoring     | os:reader         | Metrics collection
+```
+
+**Generate role-specific talosconfigs:**
+
+```bash
+# Admin (emergency use only)
+talosctl gen config cluster https://10.5.0.2:6443 \
+  --with-secrets secrets.yaml \
+  --roles os:admin \
+  --cert-ttl 168h \
+  --output admin-talosconfig
+
+# Operator (daily use)
+talosctl gen config cluster https://10.5.0.2:6443 \
+  --with-secrets secrets.yaml \
+  --roles os:operator \
+  --cert-ttl 720h \
+  --output operator-talosconfig
+
+# Reader (monitoring, developers)
+talosctl gen config cluster https://10.5.0.2:6443 \
+  --with-secrets secrets.yaml \
+  --roles os:reader \
+  --cert-ttl 2160h \
+  --output reader-talosconfig
+```
+
+### Separate Environments
+
+**Use different secrets bundles per environment:**
+
+```bash
+# Production
+talosctl gen secrets -o prod-secrets.yaml
+talosctl gen config prod-cluster https://prod.example.com:6443 \
+  --with-secrets prod-secrets.yaml
+
+# Staging  
+talosctl gen secrets -o staging-secrets.yaml
+talosctl gen config staging-cluster https://staging.example.com:6443 \
+  --with-secrets staging-secrets.yaml
+```
+
+**Benefits:**
+- Prevents accidental cross-environment access
+- Limits blast radius of credential compromise
+- Enables different security policies per environment
+
+## Kubernetes Security
+
+### API Server Hardening
+
+Configure secure API server settings:
+
+```yaml
+cluster:
+  apiServer:
+    extraArgs:
+      # Audit logging
+      audit-log-path: /var/log/audit/kube-apiserver-audit.log
+      audit-log-maxage: "30"
+      audit-log-maxbackup: "10"
+      audit-log-maxsize: "100"
+      
+      # Disable anonymous auth
+      anonymous-auth: "false"
+      
+      # Require authorization
+      authorization-mode: Node,RBAC
+      
+      # Enable admission controllers
+      enable-admission-plugins: NodeRestriction,PodSecurityPolicy
+      
+      # TLS settings
+      tls-min-version: VersionTLS13
+```
+
+### etcd Encryption
+
+Enable encryption at rest for etcd:
+
+**Talos automatically configures etcd encryption using the secretbox key from the secrets bundle (see `pkg/machinery/config/generate/secrets/bundle.go:289`).**
+
+Verify encryption is enabled:
+
+```bash
+# Check encryption configuration
+talosctl get encryptionconfig -n <control-plane-node>
+```
+
+**What's encrypted:**
+- Kubernetes Secrets
+- ConfigMaps (optional)
+- Custom resources (optional)
+
+**What's NOT encrypted:**
+- etcd peer communication (protected by TLS)
+- etcd data in transit (protected by TLS)
+
+<Note>
+etcd data is encrypted at rest by default in Talos. The encryption key is derived from the `SecretboxEncryptionSecret` in your secrets bundle.
+</Note>
+
+### Pod Security Standards
+
+Enforce pod security:
+
+**Namespace-level enforcement:**
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+```
+
+**Cluster-level defaults:**
+
+```yaml
+cluster:
+  apiServer:
+    extraArgs:
+      admission-control-config-file: /etc/kubernetes/admission-control.yaml
+    extraVolumes:
+      - name: admission-control
+        hostPath: /var/lib/admission-control.yaml
+        mountPath: /etc/kubernetes/admission-control.yaml
+        readonly: true
+```
+
+### Service Account Tokens
+
+Use bound service account tokens:
+
+```yaml
+cluster:
+  apiServer:
+    extraArgs:
+      service-account-issuer: https://kubernetes.default.svc
+      service-account-signing-key-file: /system/secrets/kubernetes/kube-service-account.key
+      service-account-key-file: /system/secrets/kubernetes/kube-service-account.key
+```
+
+**This is configured by default in Talos using the service account key from `pkg/machinery/config/generate/secrets/secrets.go:38`.**
+
+## System Hardening
+
+### Kernel Parameters
+
+Harden kernel via sysctls:
+
+```yaml
+machine:
+  sysctls:
+    # Network security
+    net.ipv4.conf.all.send_redirects: "0"
+    net.ipv4.conf.default.send_redirects: "0"
+    net.ipv4.conf.all.accept_redirects: "0"
+    net.ipv4.conf.default.accept_redirects: "0"
+    net.ipv4.conf.all.secure_redirects: "0"
+    net.ipv4.conf.default.secure_redirects: "0"
+    net.ipv6.conf.all.accept_redirects: "0"
+    net.ipv6.conf.default.accept_redirects: "0"
+    
+    # Disable source packet routing
+    net.ipv4.conf.all.accept_source_route: "0"
+    net.ipv4.conf.default.accept_source_route: "0"
+    net.ipv6.conf.all.accept_source_route: "0"
+    net.ipv6.conf.default.accept_source_route: "0"
+    
+    # Enable TCP SYN cookies
+    net.ipv4.tcp_syncookies: "1"
+    
+    # Log suspicious packets
+    net.ipv4.conf.all.log_martians: "1"
+    
+    # Ignore ICMP redirects
+    net.ipv4.conf.all.accept_redirects: "0"
+    
+    # Kernel hardening
+    kernel.kptr_restrict: "2"
+    kernel.dmesg_restrict: "1"
+```
+
+### Disable Unused Features
+
+Disable features you don't need:
+
+```yaml
+machine:
+  features:
+    # Disable if not using RBAC for API access
+    rbac: true
+    
+    # Disable if not using KubeSpan mesh network
+    stableHostname: true
+    
+    # Disable host DNS if using cluster DNS only
+    hostDNS: false
+```
+
+### Audit Logging
+
+Enable comprehensive audit logging:
+
+```yaml
+machine:
+  logging:
+    destinations:
+      # Send logs to external system
+      - endpoint: tcp://siem.example.com:514
+        format: json_lines
+        
+cluster:
+  apiServer:
+    extraArgs:
+      audit-policy-file: /etc/kubernetes/audit-policy.yaml
+      audit-log-path: /var/log/kubernetes/audit.log
+      audit-log-maxage: "30"
+      audit-log-maxbackup: "10"
+      audit-log-maxsize: "100"
+```
+
+**Audit policy example:**
+
+```yaml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+  # Log all requests at metadata level
+  - level: Metadata
+    omitStages:
+      - RequestReceived
+  # Log secret access at request level
+  - level: Request
+    resources:
+      - group: ""
+        resources: ["secrets"]
+  # Log authentication failures
+  - level: RequestResponse
+    userGroups: ["system:unauthenticated"]
+```
+
+## Monitoring and Detection
+
+### Certificate Monitoring
+
+Monitor certificate expiration:
+
+```bash
+#!/bin/bash
+# Check all certificate status
+talosctl get certificatestatus -n <node> -o yaml
+
+# Alert if expiring within 30 days
+talosctl get certificatestatus -n <node> -o json | \
+jq -r '.[] | select(.spec.validBefore | fromdateiso8601 < (now + 2592000)) | 
+  "ALERT: Certificate \(.metadata.id) expires \(.spec.validBefore)"'
+```
+
+### Security Event Monitoring
+
+Monitor for security events:
+
+```bash
+# Monitor apid for authentication failures
+talosctl logs apid -n <node> | grep -i "auth\|fail\|deny"
+
+# Monitor for unauthorized access attempts
+talosctl logs apid -n <node> | grep -i "permission denied"
+
+# Monitor kernel security events
+talosctl dmesg -n <node> | grep -i "security\|selinux\|apparmor"
+```
+
+### Intrusion Detection
+
+Consider running Falco for runtime security:
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: falco
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: falco
+  namespace: falco
+spec:
+  selector:
+    matchLabels:
+      app: falco
+  template:
+    metadata:
+      labels:
+        app: falco
+    spec:
+      hostNetwork: true
+      hostPID: true
+      containers:
+        - name: falco
+          image: falcosecurity/falco:latest
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: dev
+              mountPath: /host/dev
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+      volumes:
+        - name: dev
+          hostPath:
+            path: /dev
+        - name: proc
+          hostPath:
+            path: /proc
+```
+
+## Backup and Recovery
+
+### Secure Backups
+
+Protect your backups:
+
+**Encrypt etcd backups:**
+
+```bash
+# Create and encrypt backup
+talosctl etcd snapshot -n <control-plane-node> db.snapshot
+age -e -r <public-key> db.snapshot > db.snapshot.age
+rm db.snapshot
+```
+
+**Backup secrets bundle securely:**
+
+```bash
+# Encrypt secrets
+age -e -r <public-key> secrets.yaml > secrets.yaml.age
+
+# Store in secure location
+aws s3 cp secrets.yaml.age s3://secure-bucket/backups/ \
+  --sse aws:kms \
+  --sse-kms-key-id <kms-key-id>
+```
+
+**Backup rotation:**
+
+- Keep multiple generations of backups
+- Store backups in different geographic locations
+- Test restoration procedures regularly
+- Encrypt backups both in transit and at rest
+
+### Disaster Recovery
+
+Plan for compromise:
+
+**If CA is compromised:**
+
+1. Generate new secrets bundle
+2. Deploy new control plane with new CA
+3. Migrate workloads to new cluster
+4. Decommission old cluster
+
+**If node is compromised:**
+
+1. Isolate the node (firewall rules)
+2. Drain workloads: `kubectl drain <node>`
+3. Remove from cluster: `kubectl delete node <node>`
+4. Reset node: `talosctl reset -n <node>`
+5. Rebuild with fresh config
+
+**If talosconfig is leaked:**
+
+1. Rotate CA if necessary (see Certificates guide)
+2. Generate new talosconfigs
+3. Distribute new configs to authorized users
+4. Revoke old certificates (implement revocation list)
+
+## Compliance
+
+### CIS Benchmark
+
+Talos aligns with CIS Kubernetes benchmarks:
+
+- No SSH (CIS 4.1)
+- Certificate-based authentication (CIS 1.2.1)
+- RBAC enabled (CIS 1.2.6)
+- Audit logging (CIS 1.2.22-26)
+- etcd encryption (CIS 1.2.34)
+- No anonymous authentication (CIS 1.2.1)
+
+**Verify compliance:**
+
+```bash
+# Run kube-bench
+kubectl apply -f https://raw.githubusercontent.com/aquasecurity/kube-bench/main/job.yaml
+kubectl logs -f job/kube-bench
+```
+
+### Audit Trail
+
+Maintain audit trails:
+
+- **API access logs** - All talosctl operations
+- **Kubernetes audit logs** - All kubectl/API operations  
+- **etcd access logs** - Control plane database access
+- **System logs** - Kernel and system events
+
+Centralize logs in SIEM for analysis:
+
+```yaml
+machine:
+  logging:
+    destinations:
+      - endpoint: tcp://siem.example.com:514
+        format: json_lines
+```
+
+## Security Checklist
+
+Pre-production security checklist:
+
+### Infrastructure
+- [ ] Network segmentation implemented
+- [ ] Firewall rules configured and tested
+- [ ] Load balancer configured with TLS passthrough
+- [ ] Private network for node communication
+- [ ] VPN or bastion host for admin access
+
+### Certificates
+- [ ] CA keys encrypted at rest
+- [ ] CA keys stored in secure secret management
+- [ ] Certificate expiration monitoring configured
+- [ ] Short-lived certificates (< 365 days) for users
+- [ ] Separate secrets bundles per environment
+
+### Access Control
+- [ ] Role-based talosconfigs distributed
+- [ ] Principle of least privilege applied
+- [ ] Admin access limited to emergency use
+- [ ] Service accounts for automation
+- [ ] Talosconfigs stored securely (not in git)
+
+### Kubernetes
+- [ ] API server audit logging enabled
+- [ ] etcd encryption verified
+- [ ] Pod security standards enforced
+- [ ] Network policies configured
+- [ ] RBAC properly configured
+- [ ] Admission controllers enabled
+
+### Monitoring
+- [ ] Certificate expiration alerts
+- [ ] Authentication failure alerts  
+- [ ] Audit log analysis
+- [ ] Runtime security monitoring (Falco)
+- [ ] Centralized logging to SIEM
+
+### Backup
+- [ ] Encrypted etcd backups
+- [ ] Encrypted secrets bundle backups
+- [ ] Backup restoration tested
+- [ ] Disaster recovery plan documented
+- [ ] Off-site backup storage
+
+### Compliance
+- [ ] CIS benchmark compliance verified
+- [ ] Security policies documented
+- [ ] Incident response plan created
+- [ ] Regular security audits scheduled
+
+## Advanced Hardening
+
+### Air-Gapped Deployments
+
+For maximum security, deploy Talos in air-gapped environments:
+
+```bash
+# Generate configs offline
+talosctl gen secrets -o secrets.yaml
+talosctl gen config cluster https://10.5.0.2:6443 \
+  --with-secrets secrets.yaml
+
+# Use local registry for images
+talosctl gen config cluster https://10.5.0.2:6443 \
+  --with-secrets secrets.yaml \
+  --registry-mirror docker.io=https://registry.local
+```
+
+### Hardware Security Modules
+
+Use HSM for CA key storage:
+
+1. Generate CA keys in HSM
+2. Export CA certificate (not key)
+3. Use HSM for all signing operations
+4. Never export CA private key
+
+### Multi-Factor Authentication
+
+Implement MFA for admin access:
+
+1. Store talosconfig in Vault
+2. Require Vault authentication (MFA)
+3. Fetch talosconfig dynamically:
+   ```bash
+   vault read -field=config secret/talos/admin > ~/.talos/config
+   talosctl version
+   rm ~/.talos/config
+   ```
+
+### Immutable Infrastructure
+
+Enforce immutability:
+
+- Never modify running nodes
+- Replace nodes instead of updating
+- Use GitOps for configuration management
+- Treat nodes as cattle, not pets
+
+<Note>
+Talos enforces immutability by default with its read-only root filesystem. This is a core security feature.
+</Note>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Security Overview" icon="shield" href="/security/overview">
+    Understand Talos security architecture
+  </Card>
+  <Card title="Certificates" icon="certificate" href="/security/certificates">
+    PKI and certificate management
+  </Card>
+  <Card title="Authentication" icon="key" href="/security/authentication">
+    mTLS authentication and RBAC
+  </Card>
+</CardGroup>

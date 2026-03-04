@@ -1,0 +1,211 @@
+---
+title: Configuration Overview
+description: Understanding Talos Linux machine and cluster configuration concepts
+---
+
+Talos Linux uses a declarative configuration system based on YAML documents. The configuration defines how machines are provisioned, how the cluster operates, and how services are configured.
+
+## Configuration Structure
+
+Talos uses a multi-document YAML configuration system with the main `v1alpha1` document containing most configuration options:
+
+```yaml
+version: v1alpha1
+machine: # Machine-specific configuration
+  ...
+cluster: # Cluster-wide configuration
+  ...
+```
+
+## Configuration Types
+
+Talos configuration is organized into several key areas:
+
+### Machine Configuration
+
+Machine-specific settings that define how individual nodes operate:
+- Machine type (control plane or worker)
+- Installation options
+- Network configuration
+- Storage and disk configuration
+- Kubelet settings
+- System extensions
+
+See [Machine Configuration](/configuration/machine-config) for details.
+
+### Cluster Configuration
+
+Cluster-wide settings shared across all nodes:
+- Control plane endpoint
+- Cluster name and secrets
+- Kubernetes component configuration (API server, controller manager, scheduler, etcd)
+- Pod and service network CIDRs
+- Extra manifests and inline manifests
+
+See [Cluster Configuration](/configuration/cluster-config) for details.
+
+## Generating Configuration
+
+Use the `talosctl gen config` command to generate machine and cluster configurations:
+
+```bash
+talosctl gen config <cluster-name> <cluster-endpoint>
+```
+
+This generates three files:
+- `controlplane.yaml` - Control plane node configuration
+- `worker.yaml` - Worker node configuration  
+- `talosconfig` - Admin credentials for cluster access
+
+<Note>
+The cluster endpoint should be a stable address (load balancer or VIP) that points to the control plane nodes.
+</Note>
+
+### Example Generation
+
+```bash
+talosctl gen config my-cluster https://192.168.1.10:6443
+```
+
+## Configuration Validation
+
+Talos validates configuration documents during:
+- Configuration generation
+- Node bootstrap
+- Configuration updates via `talosctl apply-config`
+
+Validation checks include:
+- Required fields are present
+- Field values are within acceptable ranges
+- Network CIDRs don't overlap
+- Certificate validity
+- Disk selectors are valid
+
+<Warning>
+Always validate configuration changes in a test environment before applying to production clusters.
+</Warning>
+
+## Applying Configuration
+
+Apply configuration to nodes using:
+
+```bash
+# Apply to a specific node
+talosctl apply-config --nodes <node-ip> --file <config-file>
+
+# Apply with immediate reboot
+talosctl apply-config --nodes <node-ip> --file <config-file> --mode reboot
+```
+
+### Configuration Modes
+
+<ParamField path="mode" type="string" default="auto">
+  How to apply the configuration:
+  - `auto` - Apply and reboot only if necessary
+  - `reboot` - Always reboot after applying
+  - `no-reboot` - Apply without rebooting (staged for next boot)
+  - `try` - Try the config and rollback if issues occur
+</ParamField>
+
+## Configuration Patching
+
+Modify existing configurations using patches:
+
+```bash
+talosctl gen config my-cluster https://192.168.1.10:6443 \
+  --config-patch @patch.yaml
+```
+
+Example patch file:
+
+```yaml
+machine:
+  install:
+    disk: /dev/nvme0n1
+  kubelet:
+    extraArgs:
+      rotate-server-certificates: "true"
+```
+
+## Multi-Document Configuration
+
+Talos supports multiple configuration documents in a single file for advanced configurations:
+
+```yaml
+---
+version: v1alpha1
+kind: Config
+machine:
+  ...
+cluster:
+  ...
+---
+version: v1alpha1
+kind: VolumeConfig
+name: EPHEMERAL
+provisioning:
+  ...
+---
+version: v1alpha1  
+kind: NetworkDeviceConfig
+name: eth0
+...
+```
+
+Document types include:
+- Main configuration (`v1alpha1`)
+- `VolumeConfig` - Storage volumes
+- `NetworkDeviceConfig` - Network interfaces
+- `ExtensionServiceConfig` - System extensions
+- And many more specialized documents
+
+## Configuration Best Practices
+
+### Version Control
+
+Store all configuration files in version control:
+- Track changes over time
+- Enable rollback capabilities
+- Document configuration evolution
+- Enable GitOps workflows
+
+### Secrets Management
+
+<Warning>
+Never commit secrets to version control. Configuration files contain sensitive data including:
+- Machine tokens
+- Cluster secrets
+- Certificate private keys
+- Encryption keys
+</Warning>
+
+Consider:
+- Using sealed secrets or encryption at rest for configs in git
+- Generating configs dynamically in CI/CD
+- Using separate secret management tools
+
+### Environment Separation
+
+Maintain separate configurations for:
+- Development environments
+- Staging/testing environments  
+- Production environments
+
+Use config patches to manage differences between environments.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Machine Configuration" icon="server" href="/configuration/machine-config">
+    Configure individual machine settings
+  </Card>
+  <Card title="Cluster Configuration" icon="network-wired" href="/configuration/cluster-config">
+    Set up cluster-wide options
+  </Card>
+  <Card title="Network Configuration" icon="ethernet" href="/configuration/network-config">
+    Configure networking for your nodes
+  </Card>
+  <Card title="Storage Configuration" icon="hard-drive" href="/configuration/storage-config">
+    Set up disks and volumes
+  </Card>
+</CardGroup>

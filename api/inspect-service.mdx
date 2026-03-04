@@ -1,0 +1,602 @@
+---
+title: InspectService API
+description: Complete reference for Talos InspectService gRPC API methods
+---
+
+## Overview
+
+The InspectService provides auxiliary APIs for inspecting Talos internal state. These methods are primarily used for debugging, troubleshooting, and understanding the internal behavior of the Talos runtime.
+
+```protobuf
+service InspectService {
+  rpc ControllerRuntimeDependencies(google.protobuf.Empty) returns (ControllerRuntimeDependenciesResponse);
+}
+```
+
+<Note>
+  The InspectService is designed for advanced users and debugging scenarios. Most day-to-day operations use MachineService instead.
+</Note>
+
+## Controller Runtime
+
+Talos uses a controller runtime architecture where controllers manage resources. Understanding the dependency graph between controllers and resources is crucial for debugging.
+
+### ControllerRuntimeDependencies
+
+Returns the complete dependency graph of controllers and resources in the Talos runtime.
+
+**Request:** Empty
+
+**Response:**
+
+<ResponseField name="metadata" type="Metadata">
+  Standard response metadata with hostname
+</ResponseField>
+
+<ResponseField name="edges" type="ControllerDependencyEdge[]">
+  Array of dependency edges representing the relationship between controllers and resources
+</ResponseField>
+
+### ControllerDependencyEdge
+
+Each edge in the dependency graph describes a relationship between a controller and a resource.
+
+<ResponseField name="controller_name" type="string">
+  Name of the controller (e.g., `k8s.KubeletStaticPodController`, `network.LinkConfigController`)
+</ResponseField>
+
+<ResponseField name="edge_type" type="DependencyEdgeType">
+  Type of dependency edge:
+  - `OUTPUT_EXCLUSIVE`: Controller exclusively creates/updates this resource
+  - `OUTPUT_SHARED`: Multiple controllers can create/update this resource
+  - `INPUT_STRONG`: Controller requires this resource to run
+  - `INPUT_WEAK`: Controller optionally uses this resource
+  - `INPUT_DESTROY_READY`: Controller waits for resource destruction
+</ResponseField>
+
+<ResponseField name="resource_namespace" type="string">
+  Resource namespace (e.g., `network`, `k8s`, `system`)
+</ResponseField>
+
+<ResponseField name="resource_type" type="string">
+  Resource type (e.g., `LinkSpecs`, `StaticPods`, `MachineStatus`)
+</ResponseField>
+
+<ResponseField name="resource_id" type="string">
+  Optional specific resource ID (empty means all resources of this type)
+</ResponseField>
+
+## Dependency Edge Types
+
+### OUTPUT_EXCLUSIVE
+
+The controller is the sole owner of resources of this type. No other controller should create or modify these resources.
+
+```protobuf
+OUTPUT_EXCLUSIVE = 0;
+```
+
+**Example:**
+
+```
+Controller: k8s.ManifestController
+Edge Type: OUTPUT_EXCLUSIVE
+Resource: k8s.Manifest
+```
+
+This means `ManifestController` is the only controller that creates `k8s.Manifest` resources.
+
+### OUTPUT_SHARED
+
+Multiple controllers can create resources of this type. Resources must have distinct IDs.
+
+```protobuf
+OUTPUT_SHARED = 3;
+```
+
+**Example:**
+
+```
+Controller: network.AddressStatusController
+Edge Type: OUTPUT_SHARED
+Resource: network.AddressStatus
+```
+
+Multiple network controllers can create `AddressStatus` resources for different interfaces.
+
+### INPUT_STRONG
+
+The controller requires these resources to exist before running. Strong inputs create strict ordering dependencies.
+
+```protobuf
+INPUT_STRONG = 1;
+```
+
+**Example:**
+
+```
+Controller: k8s.KubeletConfigController
+Edge Type: INPUT_STRONG
+Resource: network.HostnameStatus
+```
+
+Kubelet configuration depends on hostname being resolved first.
+
+### INPUT_WEAK
+
+The controller may use these resources if they exist, but doesn't require them.
+
+```protobuf
+INPUT_WEAK = 2;
+```
+
+**Example:**
+
+```
+Controller: network.LinkConfigController
+Edge Type: INPUT_WEAK
+Resource: network.DeviceConfigSpec
+```
+
+Link configuration can proceed without explicit device config, using defaults.
+
+### INPUT_DESTROY_READY
+
+The controller needs to confirm resource destruction before proceeding.
+
+```protobuf
+INPUT_DESTROY_READY = 4;
+```
+
+**Example:**
+
+```
+Controller: system.ResetController
+Edge Type: INPUT_DESTROY_READY
+Resource: k8s.NodenameStatus
+```
+
+Node reset waits for Kubernetes node cleanup before proceeding.
+
+## Usage Examples
+
+### Retrieve Dependency Graph
+
+```go
+import (
+    "context"
+    "fmt"
+    "github.com/siderolabs/talos/pkg/machinery/api/inspect"
+    "google.golang.org/protobuf/types/known/emptypb"
+)
+
+resp, err := client.Inspect.ControllerRuntimeDependencies(
+    ctx,
+    &emptypb.Empty{},
+)
+if err != nil {
+    return err
+}
+
+for _, msg := range resp.Messages {
+    fmt.Printf("Node: %s\n", msg.Metadata.Hostname)
+    
+    for _, edge := range msg.Edges {
+        fmt.Printf("  %s [%s] -> %s/%s",
+            edge.ControllerName,
+            edge.EdgeType,
+            edge.ResourceNamespace,
+            edge.ResourceType,
+        )
+        if edge.ResourceId != "" {
+            fmt.Printf("/%s", edge.ResourceId)
+        }
+        fmt.Println()
+    }
+}
+```
+
+### Using talosctl
+
+The `talosctl inspect` command provides access to the InspectService:
+
+```bash
+# Get controller dependencies
+talosctl inspect dependencies -n 10.0.0.1
+
+# Export to JSON for analysis
+talosctl inspect dependencies -n 10.0.0.1 -o json > deps.json
+
+# Visualize with jq
+talosctl inspect dependencies -n 10.0.0.1 -o json | \
+  jq -r '.messages[].edges[] | "\(.controller_name) -> \(.resource_namespace)/\(.resource_type)"'
+```
+
+### Filter by Controller
+
+Find all resources a specific controller depends on:
+
+```go
+resp, err := client.Inspect.ControllerRuntimeDependencies(ctx, &emptypb.Empty{})
+if err != nil {
+    return err
+}
+
+controllerName := "k8s.KubeletConfigController"
+
+for _, msg := range resp.Messages {
+    for _, edge := range msg.Edges {
+        if edge.ControllerName == controllerName {
+            fmt.Printf("%s -> %s/%s\n",
+                edge.EdgeType,
+                edge.ResourceNamespace,
+                edge.ResourceType,
+            )
+        }
+    }
+}
+```
+
+### Find Resource Producers
+
+Find which controllers create a specific resource:
+
+```go
+resourceType := "network.AddressStatus"
+
+for _, msg := range resp.Messages {
+    for _, edge := range msg.Edges {
+        if edge.ResourceType == resourceType && 
+           (edge.EdgeType == inspect.DependencyEdgeType_OUTPUT_EXCLUSIVE ||
+            edge.EdgeType == inspect.DependencyEdgeType_OUTPUT_SHARED) {
+            fmt.Printf("%s creates %s\n",
+                edge.ControllerName,
+                edge.ResourceType,
+            )
+        }
+    }
+}
+```
+
+### Visualize Dependency Graph
+
+Generate a Graphviz DOT file:
+
+```go
+func generateDOT(resp *inspect.ControllerRuntimeDependenciesResponse) string {
+    var b strings.Builder
+    b.WriteString("digraph {\n")
+    
+    for _, msg := range resp.Messages {
+        for _, edge := range msg.Edges {
+            color := "black"
+            style := "solid"
+            
+            switch edge.EdgeType {
+            case inspect.DependencyEdgeType_OUTPUT_EXCLUSIVE:
+                color = "blue"
+                style = "bold"
+            case inspect.DependencyEdgeType_OUTPUT_SHARED:
+                color = "blue"
+            case inspect.DependencyEdgeType_INPUT_STRONG:
+                color = "red"
+                style = "bold"
+            case inspect.DependencyEdgeType_INPUT_WEAK:
+                color = "gray"
+                style = "dashed"
+            }
+            
+            resource := fmt.Sprintf("%s.%s",
+                edge.ResourceNamespace,
+                edge.ResourceType,
+            )
+            
+            fmt.Fprintf(&b, "  \"%s\" -> \"%s\" [color=%s,style=%s];\n",
+                edge.ControllerName,
+                resource,
+                color,
+                style,
+            )
+        }
+    }
+    
+    b.WriteString("}\n")
+    return b.String()
+}
+
+// Generate and visualize
+dot := generateDOT(resp)
+os.WriteFile("deps.dot", []byte(dot), 0644)
+// Run: dot -Tpng deps.dot -o deps.png
+```
+
+## Debugging Scenarios
+
+### Why isn't my controller running?
+
+Check if the controller is waiting for input dependencies:
+
+```bash
+talosctl inspect dependencies -n 10.0.0.1 | \
+  grep -A5 "YourController"
+```
+
+Look for INPUT_STRONG dependencies that might not be satisfied.
+
+### What depends on this resource?
+
+Find all controllers that depend on a resource:
+
+```bash
+talosctl inspect dependencies -n 10.0.0.1 -o json | \
+  jq -r '.messages[].edges[] | select(.resource_type == "LinkStatus") | .controller_name'
+```
+
+### Circular dependencies?
+
+Check for circular dependency chains:
+
+```go
+func detectCycles(edges []inspect.ControllerDependencyEdge) {
+    // Build adjacency list
+    graph := make(map[string][]string)
+    
+    for _, edge := range edges {
+        if edge.EdgeType == inspect.DependencyEdgeType_INPUT_STRONG {
+            resource := fmt.Sprintf("%s.%s",
+                edge.ResourceNamespace,
+                edge.ResourceType,
+            )
+            graph[edge.ControllerName] = append(
+                graph[edge.ControllerName],
+                resource,
+            )
+        }
+    }
+    
+    // Run cycle detection algorithm
+    // ...
+}
+```
+
+### Controller startup order
+
+Understand controller initialization sequence:
+
+```bash
+# Controllers with no INPUT_STRONG dependencies start first
+talosctl inspect dependencies -n 10.0.0.1 -o json | \
+  jq -r '
+    .messages[].edges[] | 
+    select(.edge_type == "INPUT_STRONG") | 
+    .controller_name
+  ' | sort -u
+```
+
+## Resource Namespaces
+
+Common resource namespaces in Talos:
+
+- **`network`**: Network configuration and status
+- **`k8s`**: Kubernetes-related resources
+- **`system`**: System-level resources
+- **`runtime`**: Container runtime resources
+- **`etcd`**: etcd cluster resources
+- **`secrets`**: Sensitive data (certificates, keys)
+- **`time`**: Time synchronization resources
+
+## Common Controllers
+
+### Network Controllers
+
+- `network.LinkConfigController`: Configures network interfaces
+- `network.AddressStatusController`: Monitors IP addresses
+- `network.RouteConfigController`: Manages routing tables
+- `network.HostnameController`: Sets system hostname
+- `network.ResolverController`: Configures DNS resolution
+
+### Kubernetes Controllers
+
+- `k8s.KubeletConfigController`: Generates kubelet configuration
+- `k8s.ManifestController`: Manages static pod manifests
+- `k8s.NodenameController`: Determines Kubernetes node name
+- `k8s.StaticPodController`: Ensures static pods are running
+
+### System Controllers
+
+- `system.MachineStatusController`: Reports machine status
+- `system.ServiceController`: Manages system services
+- `system.ResetController`: Handles node reset operations
+
+### etcd Controllers
+
+- `etcd.ConfigController`: Generates etcd configuration
+- `etcd.MemberController`: Manages etcd cluster membership
+- `etcd.SpecController`: Handles etcd specifications
+
+## Best Practices
+
+### Use for Debugging Only
+
+The InspectService is primarily a debugging tool. Don't rely on it for production automation:
+
+```go
+// Bad: Using inspect API for operational decisions
+if controllerHasDependency("k8s.KubeletController", "network.LinkStatus") {
+    // Do something
+}
+
+// Good: Use appropriate MachineService APIs
+resp, err := client.Version(ctx)
+```
+
+### Cache Dependency Information
+
+Dependency graphs are relatively static. Cache the results:
+
+```go
+type DependencyCache struct {
+    edges      []inspect.ControllerDependencyEdge
+    cachedAt   time.Time
+    mu         sync.RWMutex
+}
+
+func (c *DependencyCache) Get(ctx context.Context, client *client.Client) ([]inspect.ControllerDependencyEdge, error) {
+    c.mu.RLock()
+    if time.Since(c.cachedAt) < 5*time.Minute {
+        defer c.mu.RUnlock()
+        return c.edges, nil
+    }
+    c.mu.RUnlock()
+    
+    // Refresh cache
+    resp, err := client.Inspect.ControllerRuntimeDependencies(ctx, &emptypb.Empty{})
+    if err != nil {
+        return nil, err
+    }
+    
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    c.edges = resp.Messages[0].Edges
+    c.cachedAt = time.Now()
+    return c.edges, nil
+}
+```
+
+### Combine with Resource API
+
+For complete visibility, combine inspect data with resource inspection:
+
+```bash
+# See what controller manages a resource
+talosctl inspect dependencies -n 10.0.0.1 | grep LinkStatus
+
+# See actual resource instances
+talosctl get links -n 10.0.0.1
+```
+
+## Troubleshooting
+
+### Empty Response
+
+If you get an empty response, ensure:
+
+1. You're connecting to a Talos node (not another Kubernetes node)
+2. The node is fully booted
+3. Your client certificate has appropriate permissions
+
+### Missing Controllers
+
+Not all controllers appear in every node:
+
+- **Control plane nodes**: Have etcd and control plane controllers
+- **Worker nodes**: Have only worker-related controllers
+- **Cloud platforms**: Have platform-specific controllers
+
+### Performance Impact
+
+Calling ControllerRuntimeDependencies has minimal performance impact, but avoid:
+
+- Calling it in tight loops
+- Calling it on every request
+- Calling it during time-critical operations
+
+## Integration Examples
+
+### Monitoring Tool
+
+Build a controller monitoring dashboard:
+
+```go
+func monitorControllers(ctx context.Context, client *client.Client) {
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+    
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case <-ticker.C:
+            resp, err := client.Inspect.ControllerRuntimeDependencies(
+                ctx,
+                &emptypb.Empty{},
+            )
+            if err != nil {
+                log.Printf("Failed to get dependencies: %v", err)
+                continue
+            }
+            
+            // Analyze dependency graph
+            controllers := make(map[string]int)
+            for _, msg := range resp.Messages {
+                for _, edge := range msg.Edges {
+                    controllers[edge.ControllerName]++
+                }
+            }
+            
+            // Export metrics
+            for name, depCount := range controllers {
+                metrics.ControllerDependencies.WithLabelValues(name).Set(float64(depCount))
+            }
+        }
+    }
+}
+```
+
+### Development Tool
+
+Generate controller documentation:
+
+```go
+func documentControllers(resp *inspect.ControllerRuntimeDependenciesResponse) {
+    byController := make(map[string][]inspect.ControllerDependencyEdge)
+    
+    for _, msg := range resp.Messages {
+        for _, edge := range msg.Edges {
+            byController[edge.ControllerName] = append(
+                byController[edge.ControllerName],
+                edge,
+            )
+        }
+    }
+    
+    for controller, edges := range byController {
+        fmt.Printf("## %s\n\n", controller)
+        
+        // Inputs
+        fmt.Println("### Inputs\n")
+        for _, edge := range edges {
+            if edge.EdgeType == inspect.DependencyEdgeType_INPUT_STRONG ||
+               edge.EdgeType == inspect.DependencyEdgeType_INPUT_WEAK {
+                fmt.Printf("- `%s.%s` (%s)\n",
+                    edge.ResourceNamespace,
+                    edge.ResourceType,
+                    edge.EdgeType,
+                )
+            }
+        }
+        
+        // Outputs
+        fmt.Println("\n### Outputs\n")
+        for _, edge := range edges {
+            if edge.EdgeType == inspect.DependencyEdgeType_OUTPUT_EXCLUSIVE ||
+               edge.EdgeType == inspect.DependencyEdgeType_OUTPUT_SHARED {
+                fmt.Printf("- `%s.%s` (%s)\n",
+                    edge.ResourceNamespace,
+                    edge.ResourceType,
+                    edge.EdgeType,
+                )
+            }
+        }
+        
+        fmt.Println()
+    }
+}
+```
+
+## See Also
+
+- [MachineService API](/api/machine-service) - Primary node operations
+- [ClusterService API](/api/cluster-service) - Cluster-wide operations
+- [Common Types](/api/common-types) - Shared data types
+- [API Overview](/api/overview) - API introduction

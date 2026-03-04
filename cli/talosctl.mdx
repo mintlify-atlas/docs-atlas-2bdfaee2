@@ -1,0 +1,252 @@
+---
+title: talosctl
+description: Main talosctl command reference and global flags
+---
+
+## Synopsis
+
+`talosctl` is the CLI for out-of-band management of Kubernetes nodes created by Talos Linux.
+
+```bash
+talosctl [command] [flags]
+```
+
+## Description
+
+The `talosctl` command provides a comprehensive interface for managing Talos Linux clusters. It enables you to:
+
+- Manage cluster lifecycle (create, destroy, scale)
+- Perform node operations (reboot, upgrade, reset)
+- Configure machines and generate configurations
+- Troubleshoot and monitor cluster health
+- Interact with Kubernetes and etcd
+
+## Global Flags
+
+### Connection Flags
+
+<ParamField path="--talosconfig" type="string">
+  The path to the Talos configuration file
+  
+  **Default:** `$TALOSCONFIG` environment variable, or `~/.talos/config`, or `/var/run/secrets/talos.dev/config`
+  
+  **Example:**
+  ```bash
+  talosctl --talosconfig ./my-config version
+  ```
+</ParamField>
+
+<ParamField path="--nodes" type="string[]">
+  Target the specified nodes for the operation
+  
+  Can be specified multiple times or as comma-separated values. Short flag: `-n`
+  
+  **Example:**
+  ```bash
+  talosctl -n 10.5.0.2,10.5.0.3 version
+  talosctl --nodes 10.5.0.2 --nodes 10.5.0.3 version
+  ```
+</ParamField>
+
+<ParamField path="--endpoints" type="string[]">
+  Override default endpoints in Talos configuration
+  
+  Can be specified multiple times or as comma-separated values. Short flag: `-e`
+  
+  **Example:**
+  ```bash
+  talosctl -e 10.5.0.1:50000 version
+  ```
+</ParamField>
+
+<ParamField path="--context" type="string">
+  Context to be used in command
+  
+  Specifies which context from the talosconfig file to use.
+  
+  **Example:**
+  ```bash
+  talosctl --context production version
+  ```
+</ParamField>
+
+<ParamField path="--cluster" type="string">
+  Cluster to connect to if a proxy endpoint is used
+  
+  Short flag: `-c`
+  
+  **Example:**
+  ```bash
+  talosctl -c my-cluster version
+  ```
+</ParamField>
+
+### SideroV1 Authentication
+
+<ParamField path="--siderov1-keys-dir" type="string">
+  Path to the SideroV1 auth PGP keys directory
+  
+  **Default:** `$SIDEROV1_KEYS_DIR` or `~/.talos/siderov1-keys`
+  
+  Only valid for contexts that use SideroV1 authentication.
+</ParamField>
+
+## Command Groups
+
+### Talos Cluster Management
+
+Commands for managing running Talos clusters:
+
+- `apply-config` - Apply a new configuration to a node
+- `bootstrap` - Bootstrap the etcd cluster
+- `config` - Manage the client configuration file (talosconfig)
+- `dashboard` - Cluster dashboard with real-time metrics
+- `disks` - Get the list of disks from the machine
+- `dmesg` - Retrieve kernel logs
+- `edit` - Edit a resource from the default editor
+- `etcd` - Manage etcd
+- `events` - Stream runtime events
+- `get` - Get a specific resource or list of resources
+- `health` - Check cluster health
+- `inspect` - Inspect internals of Talos
+- `kubeconfig` - Download the admin kubeconfig from the node
+- `list` - List directory contents
+- `logs` - Retrieve logs for a service
+- `memory` - Show memory usage
+- `patch` - Update field(s) of a resource using a JSON patch
+- `processes` - List running processes
+- `read` - Read a file on the machine
+- `reboot` - Reboot a node
+- `reset` - Reset a node
+- `restart` - Restart a process
+- `rollback` - Rollback a node to the previous installation
+- `service` - Manage services
+- `shutdown` - Shutdown a node
+- `stats` - Get container stats
+- `support` - Generate support bundle
+- `upgrade` - Upgrade Talos on the target node
+- `upgrade-k8s` - Upgrade Kubernetes control plane
+- `version` - Print version information
+
+### Local Cluster Commands
+
+Commands for managing local development clusters:
+
+- `cluster create` - Create a local Talos cluster
+- `cluster destroy` - Destroy a local cluster
+- `cluster show` - Show cluster details
+
+### Offline Configuration Management
+
+Commands for generating and managing machine configurations offline:
+
+- `gen config` - Generate a set of configuration files
+- `gen secrets` - Generate secrets bundle
+- `gen crt` - Generate X.509 certificates
+- `gen key` - Generate Ed25519 private key
+- `gen keypair` - Generate X.509 key pair
+- `machineconfig gen` - Generate machine configuration
+- `machineconfig patch` - Patch machine configuration
+- `validate` - Validate config
+
+## Examples
+
+### Display Version Information
+
+```bash
+# Show client and server versions
+talosctl version
+
+# Show only client version
+talosctl version --client
+
+# Show short version
+talosctl version --short
+```
+
+**Output:**
+```
+Client:
+	Tag:         v1.8.0
+	SHA:         abc123def
+	Built:       2024-01-15T10:30:00Z
+	Go version:  go1.21.5
+	OS/Arch:     linux/amd64
+Server:
+	NODE:        worker-1
+	Tag:         v1.8.0
+	SHA:         abc123def
+	Built:       2024-01-15T10:30:00Z
+	Go version:  go1.21.5
+	OS/Arch:     linux/amd64
+```
+
+### Using Global Flags
+
+```bash
+# Target specific nodes
+talosctl -n 10.5.0.2,10.5.0.3 get members
+
+# Use specific context
+talosctl --context production get nodes
+
+# Override endpoints
+talosctl -e 10.5.0.1:50000 version
+
+# Combine multiple flags
+talosctl --context staging -n 10.5.0.5 -e 10.5.0.1:50000 health
+```
+
+### Configuration File Management
+
+```bash
+# Use custom talosconfig location
+talosctl --talosconfig ./configs/prod-config version
+
+# Set via environment variable
+export TALOSCONFIG=./configs/prod-config
+talosctl version
+```
+
+### Multiple Nodes Operations
+
+```bash
+# Run command on multiple nodes (parallel execution)
+talosctl -n 10.5.0.2,10.5.0.3,10.5.0.4 version
+
+# Check services across all control plane nodes
+talosctl -n 10.5.0.2,10.5.0.3,10.5.0.4 service kubelet
+```
+
+## Environment Variables
+
+<ParamField path="TALOSCONFIG" type="string">
+  Default path to the talosconfig file
+  
+  **Example:**
+  ```bash
+  export TALOSCONFIG=~/.talos/production-config
+  ```
+</ParamField>
+
+<ParamField path="SIDEROV1_KEYS_DIR" type="string">
+  Default path to SideroV1 keys directory
+  
+  **Example:**
+  ```bash
+  export SIDEROV1_KEYS_DIR=~/.talos/siderov1-keys
+  ```
+</ParamField>
+
+## Exit Codes
+
+- `0` - Success
+- `1` - General error
+- Non-zero - Command-specific error
+
+## See Also
+
+- [CLI Overview](/cli/overview) - Installation and configuration
+- [Cluster Commands](/cli/cluster-commands) - Cluster management operations
+- [Node Commands](/cli/node-commands) - Node operation commands
+- [Config Commands](/cli/config-commands) - Configuration management

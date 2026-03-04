@@ -1,0 +1,469 @@
+---
+title: Disaster Recovery
+description: Backup strategies, disaster recovery procedures, and cluster restoration for Talos Linux.
+---
+
+Disaster recovery planning ensures you can restore your Talos cluster in the event of catastrophic failures. This guide covers backup strategies, recovery procedures, and best practices.
+
+## Backup Strategy
+
+A comprehensive backup strategy includes multiple layers of protection.
+
+### What to Backup
+
+<CardGroup cols={2}>
+  <Card title="etcd Snapshots" icon="database">
+    The most critical backup - contains all Kubernetes cluster state
+  </Card>
+  
+  <Card title="Machine Configurations" icon="file-code">
+    Talos node configurations for rebuilding the cluster
+  </Card>
+  
+  <Card title="talosconfig" icon="key">
+    Administrative credentials for cluster access
+  </Card>
+  
+  <Card title="Application Data" icon="folder">
+    Persistent volumes and application-specific data
+  </Card>
+</CardGroup>
+
+## etcd Backup
+
+etcd contains all Kubernetes cluster state and is the most critical component to backup.
+
+### Manual etcd Backup
+
+Create a one-time etcd snapshot:
+
+```bash
+talosctl --nodes 10.0.0.2 etcd snapshot etcd-backup-$(date +%Y%m%d-%H%M%S).db
+```
+
+Example output:
+```
+etcd snapshot saved to "etcd-backup-20240304-120000.db" (25165824 bytes)
+snapshot info: hash 12ab34cd, revision 123456, total keys 5234, total size 25165824
+```
+
+### Automated Backup Schedule
+
+Implement automated daily backups:
+
+```bash
+#!/bin/bash
+# /usr/local/bin/etcd-backup.sh
+
+set -e
+
+BACKUP_DIR="/backups/etcd"
+RETENTION_DAYS=30
+CONTROL_PLANE_NODE="10.0.0.2"
+S3_BUCKET="s3://my-cluster-backups/etcd"
+
+# Create backup directory
+mkdir -p ${BACKUP_DIR}
+
+# Generate timestamped filename
+DATE=$(date +%Y%m%d-%H%M%S)
+FILENAME="etcd-snapshot-${DATE}.db"
+FILEPATH="${BACKUP_DIR}/${FILENAME}"
+
+echo "[$(date)] Creating etcd snapshot..."
+talosctl --nodes ${CONTROL_PLANE_NODE} etcd snapshot ${FILEPATH}
+
+if [ $? -ne 0 ]; then
+    echo "[$(date)] ERROR: Backup failed!"
+    exit 1
+fi
+
+echo "[$(date)] Backup successful: ${FILENAME}"
+
+# Upload to S3 (optional)
+if command -v aws &> /dev/null; then
+    echo "[$(date)] Uploading to S3..."
+    aws s3 cp ${FILEPATH} ${S3_BUCKET}/${FILENAME}
+    echo "[$(date)] Upload complete"
+fi
+
+# Clean up old local backups
+echo "[$(date)] Cleaning up old backups..."
+find ${BACKUP_DIR} -name "etcd-snapshot-*.db" -mtime +${RETENTION_DAYS} -delete
+
+echo "[$(date)] Backup process complete"
+```
+
+Schedule via cron:
+```bash
+# Daily at 2 AM
+0 2 * * * /usr/local/bin/etcd-backup.sh >> /var/log/etcd-backup.log 2>&1
+```
+
+### Backup to Remote Storage
+
+**AWS S3 Example**:
+```bash
+aws s3 cp etcd-backup.db s3://my-cluster-backups/etcd/etcd-backup-$(date +%Y%m%d).db
+```
+
+**Google Cloud Storage Example**:
+```bash
+gsutil cp etcd-backup.db gs://my-cluster-backups/etcd/etcd-backup-$(date +%Y%m%d).db
+```
+
+**rsync to Remote Server**:
+```bash
+rsync -avz etcd-backup.db backup-server:/backups/etcd/
+```
+
+### Backup Verification
+
+Regularly verify backup integrity:
+
+```bash
+#!/bin/bash
+# Verify the latest backup
+
+LATEST_BACKUP=$(ls -t /backups/etcd/etcd-snapshot-*.db | head -1)
+
+echo "Verifying backup: ${LATEST_BACKUP}"
+
+# Check file exists and is not empty
+if [ ! -s "${LATEST_BACKUP}" ]; then
+    echo "ERROR: Backup file is empty or missing"
+    exit 1
+fi
+
+# Verify snapshot integrity using etcdutl (if available)
+if command -v etcdutl &> /dev/null; then
+    etcdutl snapshot status ${LATEST_BACKUP}
+fi
+
+echo "Backup verification complete"
+```
+
+## Configuration Backups
+
+### Machine Configuration
+
+Backup machine configurations for all nodes:
+
+```bash
+#!/bin/bash
+# Backup all machine configurations
+
+BACKUP_DIR="/backups/configs"
+DATE=$(date +%Y%m%d)
+
+mkdir -p ${BACKUP_DIR}/${DATE}
+
+# Backup control plane configs
+for i in 1 2 3; do
+    talosctl --nodes 10.0.0.$((i+1)) get machineconfig -o yaml > \
+        ${BACKUP_DIR}/${DATE}/controlplane-${i}.yaml
+done
+
+# Backup worker configs
+for i in 1 2; do
+    talosctl --nodes 10.0.0.$((i+4)) get machineconfig -o yaml > \
+        ${BACKUP_DIR}/${DATE}/worker-${i}.yaml
+done
+
+echo "Configuration backup complete: ${BACKUP_DIR}/${DATE}"
+```
+
+### talosconfig Backup
+
+Securely backup your talosconfig:
+
+```bash
+# Backup talosconfig
+cp ~/.talos/config talosconfig-backup-$(date +%Y%m%d).yaml
+
+# Encrypt for secure storage
+gpg -c talosconfig-backup-$(date +%Y%m%d).yaml
+
+# Store in secure location
+mv talosconfig-backup-*.yaml.gpg /secure/backup/location/
+```
+
+<Warning>
+  The talosconfig contains cluster admin credentials. Store it securely and encrypt backups.
+</Warning>
+
+## Disaster Recovery Scenarios
+
+### Scenario 1: Single Control Plane Node Failure
+
+If one control plane node fails but others are healthy:
+
+<Steps>
+  <Step title="Verify cluster health">
+    ```bash
+    # Check remaining control plane nodes
+    talosctl --nodes 10.0.0.2,10.0.0.4 etcd members
+    kubectl get nodes
+    ```
+  </Step>
+
+  <Step title="Remove failed member">
+    ```bash
+    # Get member ID of failed node
+    talosctl --nodes 10.0.0.2 etcd members
+    
+    # Remove the failed member
+    talosctl --nodes 10.0.0.2 etcd remove-member <member-id>
+    ```
+  </Step>
+
+  <Step title="Replace the node">
+    ```bash
+    # Apply configuration to new node
+    talosctl apply-config --insecure \
+      --nodes 10.0.0.3 \
+      --file controlplane.yaml
+    
+    # Wait for node to join
+    talosctl --nodes 10.0.0.3 health --wait-timeout 10m
+    ```
+  </Step>
+</Steps>
+
+### Scenario 2: Complete etcd Cluster Loss
+
+If all control plane nodes are lost or etcd data is corrupted:
+
+<Steps>
+  <Step title="Prepare for recovery">
+    Ensure you have:
+    - Recent etcd snapshot
+    - Machine configurations
+    - talosconfig file
+
+    ```bash
+    ls -lh etcd-backup.db
+    ls -lh *.yaml
+    ```
+  </Step>
+
+  <Step title="Deploy first control plane node">
+    ```bash
+    # Apply configuration to first control plane node
+    talosctl apply-config --insecure \
+      --nodes 10.0.0.2 \
+      --file controlplane.yaml
+    ```
+  </Step>
+
+  <Step title="Bootstrap from snapshot">
+    ```bash
+    # Restore etcd from backup
+    talosctl --nodes 10.0.0.2 bootstrap --recover-from=etcd-backup.db
+    ```
+
+    Example output:
+    ```
+    recovering from snapshot "etcd-backup.db": hash 12ab34cd, revision 123456, total keys 5234, total size 25165824
+    ```
+  </Step>
+
+  <Step title="Wait for cluster recovery">
+    ```bash
+    # Wait for Kubernetes API to be available
+    kubectl get nodes
+    
+    # Verify cluster state
+    kubectl get pods -A
+    talosctl --nodes 10.0.0.2 etcd members
+    ```
+  </Step>
+
+  <Step title="Add additional control plane nodes">
+    ```bash
+    # Add second control plane node
+    talosctl apply-config --insecure \
+      --nodes 10.0.0.3 \
+      --file controlplane.yaml
+    
+    # Add third control plane node
+    talosctl apply-config --insecure \
+      --nodes 10.0.0.4 \
+      --file controlplane.yaml
+    
+    # Verify all members joined
+    talosctl --nodes 10.0.0.2 etcd members
+    ```
+  </Step>
+
+  <Step title="Re-add worker nodes">
+    ```bash
+    # Apply worker configurations
+    for i in 5 6; do
+        talosctl apply-config --insecure \
+          --nodes 10.0.0.$i \
+          --file worker.yaml
+    done
+    
+    # Verify cluster health
+    kubectl get nodes
+    ```
+  </Step>
+</Steps>
+
+### Scenario 3: Lost talosconfig
+
+If you lose access to talosconfig:
+
+<Steps>
+  <Step title="Access via maintenance mode">
+    If you have console access, boot into maintenance mode and extract certificates from the node.
+  </Step>
+
+  <Step title="Generate new talosconfig (if you have secrets)">
+    If you have the cluster secrets:
+
+    ```bash
+    # Generate new talosconfig from secrets
+    talosctl gen config --with-secrets secrets.yaml \
+      my-cluster https://10.0.0.2:6443
+    ```
+  </Step>
+
+  <Step title="Last resort: Re-bootstrap cluster">
+    If no backups exist, you may need to rebuild the cluster from etcd backup.
+  </Step>
+</Steps>
+
+## Testing Recovery Procedures
+
+Regularly test your disaster recovery procedures:
+
+### DR Testing Checklist
+
+- [ ] Verify backup automation is running
+- [ ] Test restoring from latest backup in non-production environment
+- [ ] Validate backup file integrity
+- [ ] Document recovery time objectives (RTO)
+- [ ] Document recovery point objectives (RPO)
+- [ ] Train team on recovery procedures
+- [ ] Update runbooks with lessons learned
+
+### Test Recovery in Staging
+
+Create a test cluster from production backup:
+
+```bash
+# Use production backup to create test cluster
+# This validates your backup and recovery procedures
+
+# 1. Deploy test control plane
+talosctl apply-config --insecure --nodes 10.1.0.2 --file test-controlplane.yaml
+
+# 2. Restore from production backup
+talosctl --nodes 10.1.0.2 bootstrap --recover-from=prod-etcd-backup.db
+
+# 3. Verify cluster state
+kubectl get nodes
+kubectl get pods -A
+
+# 4. Document any issues or timing
+```
+
+## Backup Best Practices
+
+### Frequency
+
+- **etcd snapshots**: Daily (minimum), every 6 hours for critical clusters
+- **Machine configs**: After any configuration change
+- **talosconfig**: After cluster creation or credential rotation
+
+### Retention
+
+- **Short-term**: Keep 7 daily backups
+- **Medium-term**: Keep 4 weekly backups
+- **Long-term**: Keep 12 monthly backups
+
+### Storage
+
+- **Local**: Fast access for quick recovery
+- **Remote**: Protection against site failures
+- **Encrypted**: All backups should be encrypted at rest
+- **Tested**: Regularly verify backups can be restored
+
+### Automation
+
+Automate all backup processes:
+
+```yaml
+# Example: Kubernetes CronJob for etcd backup
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: etcd-backup
+  namespace: kube-system
+spec:
+  schedule: "0 */6 * * *"  # Every 6 hours
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: backup
+            image: talosctl:latest
+            command:
+            - /backup-script.sh
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /backups
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: etcd-backup-pvc
+```
+
+## Recovery Time Objectives
+
+Understand expected recovery times:
+
+| Scenario | Expected RTO | Expected RPO |
+|----------|--------------|-------------|
+| Single node failure | 10-15 minutes | 0 (no data loss) |
+| Control plane loss | 30-45 minutes | Last backup |
+| Complete cluster loss | 1-2 hours | Last backup |
+| Lost credentials | 15-30 minutes | 0 (no data loss) |
+
+## Monitoring and Alerting
+
+Set up monitoring for backup health:
+
+```yaml
+# Example: Prometheus alert for backup failures
+groups:
+- name: backup-alerts
+  rules:
+  - alert: EtcdBackupFailed
+    expr: time() - etcd_backup_last_success_timestamp > 86400
+    for: 1h
+    labels:
+      severity: critical
+    annotations:
+      summary: "etcd backup has not succeeded in 24 hours"
+      description: "Last successful backup was {{ $value }} seconds ago"
+```
+
+## Documentation
+
+Maintain up-to-date recovery documentation:
+
+- Backup locations and access credentials
+- Step-by-step recovery procedures
+- Contact information for escalations
+- Dependencies and prerequisites
+- Known issues and workarounds
+
+Store documentation in multiple locations:
+- Internal wiki/documentation system
+- Printed copies in secure location
+- Encrypted files in multiple repositories

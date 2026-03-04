@@ -1,0 +1,250 @@
+---
+title: Security Model Overview
+description: Understanding Talos Linux's unique zero-trust security architecture
+---
+
+Talos Linux implements a fundamentally different security model compared to traditional Linux distributions. This page explains the core security principles and architecture that make Talos inherently secure by design.
+
+## Core Security Principles
+
+Talos is built on three foundational security principles:
+
+### 1. Minimal Attack Surface
+
+Talos dramatically reduces the attack surface by:
+
+- **No SSH access** - SSH is completely absent from the system
+- **No shell access** - No interactive shell or console access
+- **Immutable root filesystem** - The OS is read-only and cannot be modified at runtime
+- **API-only management** - All system operations happen through a secure gRPC API
+- **Minimal binaries** - Only essential components are included
+
+This approach eliminates entire categories of vulnerabilities:
+- No SSH key compromise
+- No unauthorized shell access
+- No runtime tampering with system files
+- No privilege escalation through traditional shell exploits
+
+### 2. Zero Trust by Default
+
+Every interaction with Talos requires explicit authentication and authorization:
+
+- **Mutual TLS (mTLS)** for all API communications
+- **Certificate-based authentication** - No passwords or shared secrets
+- **Role-based access control (RBAC)** - Fine-grained permissions via roles
+- **Cryptographic identity** - Every node and client has a cryptographic identity
+
+### 3. Defense in Depth
+
+Multiple layers of security controls:
+
+- **PKI-based trust hierarchy** - Separate CAs for Talos, Kubernetes, and etcd
+- **API authorization** - Role-based access control for all operations
+- **Secure defaults** - Security is the default configuration, not opt-in
+- **Automated certificate rotation** - Built-in certificate lifecycle management
+
+## Threat Model
+
+Talos is designed to protect against:
+
+### Network-Level Threats
+
+- **Man-in-the-middle attacks** - Prevented by mandatory mTLS
+- **Unauthorized API access** - Prevented by certificate authentication
+- **Credential theft** - No passwords or static credentials to steal
+- **Network eavesdropping** - All communications are encrypted
+
+### System-Level Threats
+
+- **Privilege escalation** - No shell access means no traditional escalation paths
+- **Runtime tampering** - Immutable filesystem prevents modification
+- **Malicious binaries** - Limited attack surface and read-only system
+- **Container breakout** - Minimal host surface area to exploit
+
+### Operational Threats
+
+- **Credential leakage** - Certificate-based authentication with short TTLs
+- **Insider threats** - RBAC limits damage from compromised credentials
+- **Configuration drift** - Immutable infrastructure prevents unauthorized changes
+
+## Architecture Components
+
+Talos security is implemented through several key components:
+
+### apid - API Gateway
+
+The `apid` service is the sole entry point for external communication:
+
+- Enforces mTLS authentication on all connections
+- Routes API requests to appropriate backend services
+- Verifies client certificates and roles
+- Located at `internal/app/apid/main.go:95` - implements certificate verification
+
+### machined - System Controller
+
+The `machined` service manages system state:
+
+- Implements the machine API
+- Generates and manages node certificates
+- Enforces authorization policies
+- Maintains the security state of the system
+
+### trustd - Certificate Management
+
+The `trustd` service handles certificate operations:
+
+- Issues node certificates during bootstrap
+- Manages certificate lifecycle
+- Provides CSR (Certificate Signing Request) functionality
+
+## Public Key Infrastructure (PKI)
+
+Talos uses a multi-tier PKI architecture with separate certificate authorities:
+
+### Talos OS CA
+
+Manages identity and authentication for the Talos API:
+
+- Signs client certificates for `talosctl` access
+- Signs server certificates for Talos nodes
+- Organization: `talos` (see `pkg/machinery/config/generate/secrets/ca.go:58`)
+
+### Kubernetes CA
+
+Manages Kubernetes control plane identity:
+
+- Signs Kubernetes component certificates
+- Independent from Talos OS CA
+- Organization: `kubernetes` (see `pkg/machinery/config/generate/secrets/ca.go:32`)
+
+### etcd CA
+
+Manages etcd cluster identity:
+
+- Signs etcd peer and client certificates
+- Isolated from other PKI components
+- Organization: `etcd` (see `pkg/machinery/config/generate/secrets/ca.go:20`)
+
+### Kubernetes Aggregator CA
+
+Manages front-proxy authentication:
+
+- Signs aggregator certificates
+- Used for API server aggregation
+- Common name: `front-proxy` (see `pkg/machinery/config/generate/secrets/ca.go:45`)
+
+## Security Bundle
+
+During cluster initialization, Talos generates a comprehensive secrets bundle containing:
+
+```go
+// From pkg/machinery/config/generate/secrets/secrets.go:21-42
+type Bundle struct {
+    Cluster    *Cluster     // Cluster ID and secret
+    Secrets    *Secrets     // Bootstrap tokens and encryption keys
+    TrustdInfo *TrustdInfo  // Trustd authentication token
+    Certs      *Certs       // All PKI certificates
+}
+
+type Certs struct {
+    Etcd              // Etcd CA cert and key
+    K8s               // Kubernetes CA cert and key
+    K8sAggregator     // Aggregator CA cert and key
+    K8sServiceAccount // Service account signing key
+    OS                // Talos API CA cert and key
+}
+```
+
+This bundle is generated once during cluster creation and used to bootstrap all nodes with consistent cryptographic identity.
+
+## No SSH Philosophy
+
+The absence of SSH is not an oversight—it's a deliberate security decision:
+
+**Why no SSH?**
+
+- SSH is a common attack vector and requires constant patching
+- SSH keys are often poorly managed and long-lived
+- Shell access provides broad system access that's hard to audit
+- Interactive shells enable lateral movement after compromise
+
+**What replaces SSH?**
+
+- Secure gRPC API with mTLS authentication
+- Declarative configuration instead of imperative commands
+- Structured API operations that can be audited
+- Short-lived certificates with automatic rotation
+- Role-based access control for fine-grained permissions
+
+<Note>
+If you need to access node logs or inspect the system, use `talosctl` commands like `talosctl logs`, `talosctl dmesg`, and `talosctl dashboard` instead of SSH.
+</Note>
+
+## API-Only Management
+
+All Talos operations happen through the gRPC API:
+
+- **talosctl** - Primary CLI tool for cluster management
+- **Machine API** - Node lifecycle and configuration
+- **OS API** - System diagnostics and operations
+- **Cluster API** - Cluster-wide operations
+
+Every API call:
+1. Requires a valid client certificate
+2. Is encrypted with TLS 1.3
+3. Is authorized based on client roles
+4. Can be audited and logged
+
+## Immutable Infrastructure
+
+Talos implements true immutability:
+
+- Root filesystem is read-only (squashfs)
+- System binaries cannot be modified
+- No package manager or system updates via apt/yum
+- Updates happen by replacing the entire OS image
+
+**Benefits:**
+
+- Prevents runtime tampering
+- Ensures consistency across nodes
+- Simplifies security auditing
+- Enables atomic updates and rollbacks
+
+## Security Defaults
+
+Talos ships with secure defaults:
+
+- mTLS enabled on all APIs
+- No default passwords or credentials
+- Encrypted etcd (via TLS)
+- Certificate-based authentication only
+- Minimal exposed network services
+- SELinux enforcement (when available)
+
+<Warning>
+Talos requires explicit configuration to disable security features. Never disable mTLS or certificate validation in production environments.
+</Warning>
+
+## Compliance and Standards
+
+Talos security design aligns with industry standards:
+
+- **Zero Trust Architecture** - Inspired by BeyondCorp and NIST 800-207
+- **Defense in Depth** - Multiple independent security layers
+- **Least Privilege** - Role-based access control limits permissions
+- **Immutable Infrastructure** - Aligns with cloud-native security best practices
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Certificates" icon="certificate" href="/security/certificates">
+    Learn about PKI architecture and certificate management
+  </Card>
+  <Card title="Authentication" icon="key" href="/security/authentication">
+    Understand mTLS authentication and talosconfig
+  </Card>
+  <Card title="Hardening" icon="shield" href="/security/hardening">
+    Security best practices and hardening guidelines
+  </Card>
+</CardGroup>

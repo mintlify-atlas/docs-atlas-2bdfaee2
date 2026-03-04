@@ -1,0 +1,236 @@
+---
+title: Cluster Management
+description: Day-2 operations for managing Talos Linux clusters including adding nodes, removing nodes, and scaling workloads.
+---
+
+Cluster management involves the ongoing operational tasks required to maintain a healthy Talos Linux cluster. This includes adding new nodes, removing nodes, applying configuration changes, and managing cluster state.
+
+## Adding Nodes to a Cluster
+
+To add new nodes to an existing cluster, you need to generate machine configurations and apply them to the new nodes.
+
+<Steps>
+  <Step title="Generate machine configuration">
+    Generate the machine configuration for the new node. Use the same cluster configuration to maintain consistency:
+
+    ```bash
+    talosctl gen config my-cluster https://controlplane.example.com:6443 \
+      --output-types controlplane,worker
+    ```
+
+    This generates configuration files for both control plane and worker nodes.
+  </Step>
+
+  <Step title="Apply configuration to new node">
+    Apply the appropriate configuration to the new node using maintenance mode:
+
+    ```bash
+    talosctl apply-config --insecure \
+      --nodes 10.0.0.5 \
+      --file controlplane.yaml
+    ```
+
+    <Note>
+      Use `--insecure` flag when applying configuration to a node for the first time, as it doesn't have certificates yet.
+    </Note>
+  </Step>
+
+  <Step title="Wait for node to join">
+    Monitor the node as it joins the cluster:
+
+    ```bash
+    talosctl --nodes 10.0.0.5 health --wait-timeout 10m
+    ```
+
+    The node will automatically join the etcd cluster (for control plane nodes) or register with Kubernetes (for worker nodes).
+  </Step>
+</Steps>
+
+## Removing Nodes from a Cluster
+
+Properly removing nodes ensures data integrity and prevents cluster disruption.
+
+<Steps>
+  <Step title="Cordon and drain the node (Worker nodes)">
+    For worker nodes, first cordon and drain workloads:
+
+    ```bash
+    kubectl cordon worker-1
+    kubectl drain worker-1 --ignore-daemonsets --delete-emptydir-data
+    ```
+  </Step>
+
+  <Step title="Remove node from etcd (Control plane nodes)">
+    For control plane nodes, gracefully leave the etcd cluster:
+
+    ```bash
+    talosctl --nodes 10.0.0.3 etcd leave
+    ```
+
+    Verify the node has left:
+
+    ```bash
+    talosctl --nodes 10.0.0.2 etcd members
+    ```
+  </Step>
+
+  <Step title="Reset the node">
+    Reset the node to wipe its configuration and data:
+
+    ```bash
+    talosctl --nodes 10.0.0.3 reset --graceful --reboot
+    ```
+
+    <Warning>
+      The `reset` command wipes all data on the node. Ensure you've backed up any important data.
+    </Warning>
+  </Step>
+
+  <Step title="Remove from Kubernetes">
+    Delete the node from Kubernetes:
+
+    ```bash
+    kubectl delete node worker-1
+    ```
+  </Step>
+</Steps>
+
+## Updating Node Configuration
+
+Talos supports multiple modes for applying configuration changes.
+
+### Auto Mode (Default)
+
+Applies the configuration with automatic reboot if required:
+
+```bash
+talosctl apply-config --nodes 10.0.0.2 --file updated-config.yaml
+```
+
+### No Reboot Mode
+
+Applies changes without rebooting (only works for non-critical changes):
+
+```bash
+talosctl apply-config --nodes 10.0.0.2 \
+  --file updated-config.yaml \
+  --mode no-reboot
+```
+
+### Try Mode
+
+Tests configuration changes with automatic rollback:
+
+```bash
+talosctl apply-config --nodes 10.0.0.2 \
+  --file updated-config.yaml \
+  --mode try \
+  --timeout 5m
+```
+
+If the node becomes unreachable within the timeout, it automatically reverts to the previous configuration.
+
+### Staged Mode
+
+Stages the configuration to be applied on next reboot:
+
+```bash
+talosctl apply-config --nodes 10.0.0.2 \
+  --file updated-config.yaml \
+  --mode staged
+```
+
+## Patching Configuration
+
+For small changes, use configuration patches instead of applying full configs:
+
+```bash
+talosctl patch machineconfig --nodes 10.0.0.2 \
+  --patch '[{"op": "add", "path": "/machine/time/servers", "value": ["time.cloudflare.com"]}]'
+```
+
+You can also use patch files:
+
+```bash
+talosctl patch machineconfig --nodes 10.0.0.2 \
+  --patch @patch.yaml
+```
+
+## Scaling Control Plane
+
+When scaling the control plane, maintain an odd number of nodes (3, 5, 7) for etcd quorum.
+
+### Adding a Control Plane Node
+
+<Steps>
+  <Step title="Add the new control plane node">
+    Apply the control plane configuration:
+
+    ```bash
+    talosctl apply-config --insecure \
+      --nodes 10.0.0.4 \
+      --file controlplane.yaml
+    ```
+  </Step>
+
+  <Step title="Verify etcd membership">
+    Check that the node has joined etcd:
+
+    ```bash
+    talosctl --nodes 10.0.0.2 etcd members
+    ```
+
+    Example output:
+    ```
+    NODE         ID               HOSTNAME        PEER URLS                     CLIENT URLS                   LEARNER
+    10.0.0.2     6457a4e8ecba5c61 controlplane-1  https://10.0.0.2:2380         https://10.0.0.2:2379         false
+    10.0.0.3     7d3c4c7e8f9a1b2c controlplane-2  https://10.0.0.3:2380         https://10.0.0.3:2379         false
+    10.0.0.4     8e4d5d8f9g0b2c3d controlplane-3  https://10.0.0.4:2380         https://10.0.0.4:2379         false
+    ```
+  </Step>
+</Steps>
+
+### Removing a Control Plane Node
+
+<Warning>
+  Never reduce the control plane below 3 nodes in production. Always maintain etcd quorum.
+</Warning>
+
+Follow the same process as removing regular nodes, ensuring the node gracefully leaves etcd first.
+
+## Checking Cluster Health
+
+Regularly verify cluster health:
+
+```bash
+talosctl health \
+  --control-plane-nodes 10.0.0.2,10.0.0.3,10.0.0.4 \
+  --worker-nodes 10.0.0.5,10.0.0.6
+```
+
+This performs comprehensive health checks including:
+- Node readiness
+- etcd cluster health
+- Kubernetes API server availability
+- Control plane component status
+- Pod readiness
+
+## Managing Services
+
+View running services on a node:
+
+```bash
+talosctl --nodes 10.0.0.2 services
+```
+
+Restart a specific service:
+
+```bash
+talosctl --nodes 10.0.0.2 service kubelet restart
+```
+
+Check service status:
+
+```bash
+talosctl --nodes 10.0.0.2 service kubelet status
+```

@@ -1,0 +1,416 @@
+---
+title: Docker Deployment
+description: Deploy Talos Linux as Docker containers for local testing and development
+---
+
+Talos Linux can run as Docker containers for local development and testing. This provides a fast, lightweight way to create multi-node Kubernetes clusters on your local machine.
+
+## Overview
+
+The Docker provisioner creates:
+
+- Control plane and worker nodes as Docker containers
+- A Docker network for cluster communication
+- Automatic port forwarding for Kubernetes API access
+- Shared volumes for persistent storage (optional)
+
+<Warning>
+  Docker-based clusters are for development and testing only. Do not use in production.
+</Warning>
+
+## Prerequisites
+
+- Docker Engine 20.10+ installed and running
+- `talosctl` installed
+- At least 4GB RAM available for Docker
+- Sufficient CPU cores (2+ cores per node recommended)
+
+## Quick Start
+
+Create a local cluster with one command:
+
+```bash
+talosctl cluster create
+```
+
+This creates:
+- 1 control plane node
+- 0 worker nodes (by default)
+- Kubernetes API accessible at `https://127.0.0.1:6443`
+- Talos API accessible at `127.0.0.1:50000`
+
+### Verify Cluster
+
+```bash
+# Check nodes
+docker ps --filter name=talos
+
+# Access Talos API
+talosctl version --nodes 127.0.0.1
+
+# Access Kubernetes API
+kubectl get nodes
+```
+
+## Cluster Configuration
+
+### Multi-Node Cluster
+
+Create a cluster with multiple control plane and worker nodes:
+
+```bash
+talosctl cluster create \
+  --name my-cluster \
+  --controlplanes 3 \
+  --workers 2
+```
+
+### Custom Configuration
+
+<Steps>
+  <Step title="Generate Configuration">
+    Generate base configuration:
+    
+    ```bash
+    talosctl gen config my-cluster https://127.0.0.1:6443 \
+      --output-dir _out
+    ```
+  </Step>
+  
+  <Step title="Apply Patches">
+    Create configuration patches for Docker:
+    
+    ```yaml docker-patch.yaml
+    machine:
+      install:
+        disk: /dev/vda
+      kubelet:
+        extraMounts:
+          - destination: /var/lib/containerd
+            type: bind
+            source: /var/lib/containerd
+            options:
+              - bind
+              - rshared
+              - rw
+    ```
+  </Step>
+  
+  <Step title="Create Cluster">
+    Create cluster with patches:
+    
+    ```bash
+    talosctl cluster create \
+      --controlplane-config-patch @docker-patch.yaml \
+      --worker-config-patch @docker-patch.yaml
+    ```
+  </Step>
+</Steps>
+
+## Command Reference
+
+### Create Options
+
+<CodeGroup>
+```bash Basic
+# Minimal cluster (1 control plane)
+talosctl cluster create
+```
+
+```bash Production-like
+# HA cluster with workers
+talosctl cluster create \
+  --name prod-test \
+  --controlplanes 3 \
+  --workers 3 \
+  --cpus 2 \
+  --memory 4096
+```
+
+```bash Custom Image
+# Use specific Talos version
+talosctl cluster create \
+  --image ghcr.io/siderolabs/talos:v1.6.0
+```
+
+```bash Port Forwarding
+# Expose additional ports on workers
+talosctl cluster create \
+  --workers 2 \
+  --exposed-ports 80:80,443:443
+```
+
+```bash Custom Network
+# Specify network CIDR
+talosctl cluster create \
+  --subnet 172.20.0.0/24
+```
+</CodeGroup>
+
+### Docker Provisioner Options
+
+From the source code:
+
+```go
+// From pkg/provision/options.go
+type Options struct {
+    // Docker-specific options
+    DockerPorts       []string  // Expose ports to worker machines
+    DockerPortsHostIP string    // Host IP for exposed ports (default: 0.0.0.0)
+    
+    // Boot options
+    BootloaderEnabled bool      // Enable bootloader (default: true)
+    
+    // Network options
+    Network NetworkRequest
+}
+```
+
+### Configuration Patches
+
+Apply configuration patches:
+
+<CodeGroup>
+```bash Control Plane
+talosctl cluster create \
+  --controlplane-config-patch '[{"op":"add","path":"/cluster/allowSchedulingOnControlPlanes","value":true}]'
+```
+
+```bash Worker
+talosctl cluster create \
+  --worker-config-patch @worker-patch.yaml
+```
+
+```bash Both
+talosctl cluster create \
+  --config-patch @common-patch.yaml \
+  --controlplane-config-patch @cp-patch.yaml \
+  --worker-config-patch @worker-patch.yaml
+```
+</CodeGroup>
+
+## Docker Provisioner Architecture
+
+The Docker provisioner creates cluster components:
+
+```go
+// From pkg/provision/providers/docker/create.go
+func (p *provisioner) Create(ctx context.Context, request provision.ClusterRequest, opts ...provision.Option) (provision.Cluster, error) {
+    // 1. Ensure Talos image exists
+    p.ensureImageExists(ctx, request.Image, &options)
+    
+    // 2. Create Docker network
+    p.createNetwork(ctx, request.Network)
+    
+    // 3. Create control plane nodes
+    nodeInfo, _ := p.createNodes(ctx, request, request.Nodes.ControlPlaneNodes(), &options, true)
+    
+    // 4. Create worker nodes
+    workerNodeInfo, _ := p.createNodes(ctx, request, request.Nodes.WorkerNodes(), &options, false)
+    
+    // 5. Save cluster state
+    state.Save()
+}
+```
+
+## Advanced Options
+
+### Shared Volumes
+
+Mount host directories into worker containers:
+
+```bash
+talosctl cluster create \
+  --workers 2 \
+  --mount type=bind,source=/host/path,destination=/container/path
+```
+
+### Custom CNI
+
+Use custom CNI configuration:
+
+```bash
+talosctl cluster create \
+  --cni-bundle-url https://example.com/cni-bundle.tar.gz
+```
+
+### Registry Mirrors
+
+Configure registry mirrors for airgapped environments:
+
+```yaml
+cluster:
+  registryMirrors:
+    docker.io:
+      mirrors:
+        - http://registry.local:5000
+```
+
+### Disable IPv6
+
+```bash
+talosctl cluster create --disable-ipv6
+```
+
+## Networking
+
+### Network Configuration
+
+Docker clusters use a bridge network:
+
+```go
+// From pkg/provision/request.go
+type NetworkRequest struct {
+    Name              string
+    CIDRs             []netip.Prefix
+    GatewayAddrs      []netip.Addr
+    MTU               int
+    
+    // Docker-specific
+    DockerDisableIPv6 bool
+}
+```
+
+### Port Exposure
+
+Expose services on worker nodes:
+
+```bash
+# Expose HTTP/HTTPS
+talosctl cluster create \
+  --workers 2 \
+  --exposed-ports 8080:80,8443:443
+
+# Access from host
+curl http://localhost:8080
+```
+
+### Host IP Configuration
+
+```bash
+# Bind to specific host IP
+talosctl cluster create \
+  --host-ip 192.168.1.100 \
+  --exposed-ports 80:80
+```
+
+## Managing Clusters
+
+### List Clusters
+
+```bash
+talosctl cluster show
+```
+
+### Destroy Cluster
+
+```bash
+talosctl cluster destroy --name my-cluster
+```
+
+### Access Nodes
+
+```bash
+# Get node IPs
+talosctl cluster show --name my-cluster
+
+# Access specific node
+talosctl -n 172.20.0.2 version
+
+# Execute command
+docker exec talos-default-controlplane-1 cat /proc/version
+```
+
+## Troubleshooting
+
+### Container Logs
+
+```bash
+# View container logs
+docker logs talos-default-controlplane-1
+
+# Follow logs
+docker logs -f talos-default-controlplane-1
+```
+
+### Network Issues
+
+```bash
+# Inspect network
+docker network inspect talos-default
+
+# Check connectivity
+docker exec talos-default-controlplane-1 ping 172.20.0.3
+```
+
+### Disk Space
+
+```bash
+# Check container disk usage
+docker exec talos-default-controlplane-1 df -h
+
+# Clean up unused images
+docker image prune -a
+```
+
+### Resource Limits
+
+Increase Docker resource limits in Docker Desktop settings or daemon configuration:
+
+```json /etc/docker/daemon.json
+{
+  "default-ulimits": {
+    "nofile": {
+      "Name": "nofile",
+      "Hard": 64000,
+      "Soft": 64000
+    }
+  }
+}
+```
+
+## Performance Considerations
+
+### Resource Allocation
+
+Allocate sufficient resources:
+
+```bash
+talosctl cluster create \
+  --controlplanes 3 \
+  --workers 2 \
+  --cpus 2 \
+  --memory 4096 \
+  --disk 10240
+```
+
+### Volume Performance
+
+For better I/O performance, consider:
+
+- Using volume mounts instead of bind mounts
+- Enabling overlay2 storage driver
+- Using SSD storage for Docker data directory
+
+## Differences from Production
+
+Docker clusters differ from production deployments:
+
+| Feature | Docker | Production |
+|---------|--------|------------|
+| Boot Process | Container runtime | Full boot (UEFI/BIOS) |
+| Networking | Bridge network | Physical/Cloud network |
+| Storage | Docker volumes | Physical disks |
+| Console | Docker logs | Serial console |
+| Upgrades | Container replacement | In-place upgrades |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/configuration/overview">
+    Learn about machine configuration
+  </Card>
+  <Card title="QEMU" icon="desktop" href="/deployment/kubernetes-in-docker">
+    Try full VM experience with QEMU
+  </Card>
+</CardGroup>

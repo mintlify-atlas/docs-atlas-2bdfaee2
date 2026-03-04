@@ -1,0 +1,609 @@
+---
+title: Installing talosctl
+description: Install the talosctl CLI tool on macOS, Linux, or Windows to manage Talos Linux clusters.
+---
+
+The `talosctl` CLI is the primary tool for interacting with Talos Linux clusters. This guide covers installation on all major operating systems.
+
+## Overview
+
+`talosctl` is a command-line interface that communicates with Talos Linux nodes via a secure gRPC API. You'll use it to:
+
+- Create and manage local development clusters
+- Configure and bootstrap Talos nodes
+- Perform cluster operations (upgrade, reboot, etc.)
+- Retrieve logs and debug information
+- Generate and manage configurations
+- Access Kubernetes clusters running on Talos
+
+<Note>
+The `talosctl` version should match your Talos Linux version for full compatibility. You can run different versions, but some features may not work correctly.
+</Note>
+
+## Installation Methods
+
+Choose your operating system:
+
+<Tabs>
+  <Tab title="macOS">
+    ### Using Homebrew (Recommended)
+
+    The easiest way to install `talosctl` on macOS is via Homebrew:
+
+    ```bash
+    brew install siderolabs/tap/talosctl
+    ```
+
+    This installs the latest stable release of `talosctl` and keeps it updated with `brew upgrade`.
+
+    #### Update talosctl
+
+    ```bash
+    brew upgrade talosctl
+    ```
+
+    #### Install Specific Version
+
+    ```bash
+    # Install a specific version
+    brew install siderolabs/tap/talosctl@1.13.0
+    ```
+
+    ### Using curl (Alternative)
+
+    If you prefer not to use Homebrew, download the binary directly:
+
+    <CodeGroup>
+      ```bash Intel (x86_64)
+      curl -sL https://talos.dev/install | sh
+      ```
+
+      ```bash Apple Silicon (arm64)
+      curl -sL https://talos.dev/install | sh
+      ```
+    </CodeGroup>
+
+    The installation script automatically detects your architecture and installs to `/usr/local/bin`.
+
+    #### Manual Installation
+
+    For manual installation with version control:
+
+    ```bash
+    # Set your desired version
+    export TALOS_VERSION="v1.13.0"
+
+    # Detect architecture
+    export ARCH=$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
+
+    # Download binary
+    curl -Lo /usr/local/bin/talosctl \
+      https://github.com/siderolabs/talos/releases/download/${TALOS_VERSION}/talosctl-darwin-${ARCH}
+
+    # Make executable
+    chmod +x /usr/local/bin/talosctl
+    ```
+  </Tab>
+
+  <Tab title="Linux">
+    ### Using curl (Recommended)
+
+    The installation script is the recommended method for Linux:
+
+    ```bash
+    curl -sL https://talos.dev/install | sh
+    ```
+
+    This script:
+    - Detects your system architecture (amd64/arm64)
+    - Downloads the appropriate binary
+    - Installs to `/usr/local/bin/talosctl`
+    - Makes the binary executable
+
+    <Note>
+    You may need to use `sudo` if installing to `/usr/local/bin` requires elevated privileges:
+    ```bash
+    curl -sL https://talos.dev/install | sudo sh
+    ```
+    </Note>
+
+    ### Manual Installation
+
+    For manual installation with full control:
+
+    ```bash
+    # Set version and architecture
+    export TALOS_VERSION="v1.13.0"
+    export ARCH="amd64"  # or "arm64" for ARM systems
+
+    # Download binary
+    curl -Lo /usr/local/bin/talosctl \
+      https://github.com/siderolabs/talos/releases/download/${TALOS_VERSION}/talosctl-linux-${ARCH}
+
+    # Make executable
+    sudo chmod +x /usr/local/bin/talosctl
+    ```
+
+    #### Installing to Custom Location
+
+    If you don't have permissions for `/usr/local/bin`:
+
+    ```bash
+    # Install to user bin directory
+    mkdir -p ~/.local/bin
+
+    curl -Lo ~/.local/bin/talosctl \
+      https://github.com/siderolabs/talos/releases/download/v1.13.0/talosctl-linux-amd64
+
+    chmod +x ~/.local/bin/talosctl
+
+    # Add to PATH (add to ~/.bashrc or ~/.zshrc for persistence)
+    export PATH="$HOME/.local/bin:$PATH"
+    ```
+
+    ### Package Managers
+
+    <AccordionGroup>
+      <Accordion title="Arch Linux (AUR)">
+        Install from the Arch User Repository:
+
+        ```bash
+        yay -S talosctl-bin
+        ```
+
+        Or using `paru`:
+
+        ```bash
+        paru -S talosctl-bin
+        ```
+      </Accordion>
+
+      <Accordion title="Nix">
+        For NixOS or systems with Nix package manager:
+
+        ```bash
+        nix-env -iA nixpkgs.talosctl
+        ```
+
+        Or in a Nix shell:
+
+        ```bash
+        nix-shell -p talosctl
+        ```
+      </Accordion>
+    </AccordionGroup>
+  </Tab>
+
+  <Tab title="Windows">
+    ### Using PowerShell
+
+    Install `talosctl` on Windows using PowerShell:
+
+    ```powershell
+    # Create install directory
+    $installDir = "$env:USERPROFILE\.talos"
+    New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+
+    # Download latest release
+    $version = "v1.13.0"
+    $url = "https://github.com/siderolabs/talos/releases/download/$version/talosctl-windows-amd64.exe"
+    $output = "$installDir\talosctl.exe"
+
+    Invoke-WebRequest -Uri $url -OutFile $output
+
+    # Add to PATH
+    $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ($currentPath -notlike "*$installDir*") {
+        [Environment]::SetEnvironmentVariable(
+            "Path",
+            "$currentPath;$installDir",
+            "User"
+        )
+    }
+
+    Write-Host "talosctl installed successfully. Please restart your terminal."
+    ```
+
+    ### Using Chocolatey
+
+    If you have [Chocolatey](https://chocolatey.org/) installed:
+
+    ```powershell
+    choco install talosctl
+    ```
+
+    ### Using Scoop
+
+    If you have [Scoop](https://scoop.sh/) installed:
+
+    ```powershell
+    # Add bucket
+    scoop bucket add talos https://github.com/siderolabs/scoop-bucket
+
+    # Install talosctl
+    scoop install talosctl
+    ```
+
+    ### Manual Download
+
+    1. Download the Windows binary from [GitHub Releases](https://github.com/siderolabs/talos/releases)
+    2. Choose `talosctl-windows-amd64.exe`
+    3. Rename to `talosctl.exe`
+    4. Move to a directory in your PATH
+
+    <Note>
+    On Windows, some features that require low-level system access may have limitations compared to macOS and Linux.
+    </Note>
+  </Tab>
+
+  <Tab title="Docker">
+    ### Run in Container
+
+    You can run `talosctl` in a Docker container without installing it locally:
+
+    ```bash
+    docker run --rm -v $PWD:/workspace -v $HOME/.talos:/root/.talos \
+      ghcr.io/siderolabs/talosctl:v1.13.0 version
+    ```
+
+    Create an alias for convenience:
+
+    ```bash
+    alias talosctl='docker run --rm -v $PWD:/workspace -v $HOME/.talos:/root/.talos ghcr.io/siderolabs/talosctl:latest'
+    ```
+
+    Add this to your `.bashrc` or `.zshrc` for persistence.
+
+    <Note>
+    When using the Docker method, you'll need to mount your Talos config directory (`~/.talos`) and any local files you're working with.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Verify Installation
+
+After installation, verify that `talosctl` is working correctly:
+
+<Steps>
+  <Step title="Check version">
+    ```bash
+    talosctl version --client
+    ```
+
+    Expected output:
+    ```
+    Tag:         v1.13.0
+    SHA:         a1b2c3d4
+    Built:       2026-03-01T10:00:00Z
+    Go version:  go1.26
+    OS/Arch:     darwin/arm64
+    ```
+  </Step>
+
+  <Step title="Verify command completion">
+    Test that the command works:
+
+    ```bash
+    talosctl --help
+    ```
+
+    You should see the complete list of available commands and options.
+  </Step>
+
+  <Step title="Check installation path">
+    Confirm the binary location:
+
+    ```bash
+    which talosctl
+    ```
+
+    Common locations:
+    - macOS/Linux: `/usr/local/bin/talosctl`
+    - Linux (user install): `~/.local/bin/talosctl`
+    - Windows: `%USERPROFILE%\.talos\talosctl.exe`
+  </Step>
+</Steps>
+
+## Shell Completion
+
+Enable shell completion for easier command usage:
+
+<Tabs>
+  <Tab title="Bash">
+    ```bash
+    # Add to ~/.bashrc
+    source <(talosctl completion bash)
+
+    # Or install system-wide
+    talosctl completion bash | sudo tee /etc/bash_completion.d/talosctl
+    ```
+  </Tab>
+
+  <Tab title="Zsh">
+    ```bash
+    # Add to ~/.zshrc
+    source <(talosctl completion zsh)
+
+    # Or for Oh My Zsh
+    mkdir -p ~/.oh-my-zsh/completions
+    talosctl completion zsh > ~/.oh-my-zsh/completions/_talosctl
+    ```
+  </Tab>
+
+  <Tab title="Fish">
+    ```bash
+    # Add to ~/.config/fish/config.fish
+    talosctl completion fish | source
+
+    # Or install permanently
+    talosctl completion fish > ~/.config/fish/completions/talosctl.fish
+    ```
+  </Tab>
+
+  <Tab title="PowerShell">
+    ```powershell
+    # Add to PowerShell profile
+    talosctl completion powershell | Out-String | Invoke-Expression
+
+    # To find your profile location
+    echo $PROFILE
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+After enabling completion, restart your shell or source your configuration file for changes to take effect.
+</Note>
+
+## Configuration
+
+`talosctl` stores its configuration in `~/.talos/config` by default. This file contains:
+
+- Cluster endpoints (API server addresses)
+- Authentication certificates and keys
+- Context information (which cluster you're managing)
+
+### Configuration File Location
+
+The default location is `~/.talos/config`, but you can override it:
+
+```bash
+# Use custom config file
+export TALOSCONFIG=/path/to/custom/config
+talosctl version
+
+# Or specify per-command
+talosctl --talosconfig /path/to/custom/config version
+```
+
+### Initial Configuration
+
+When you create your first cluster, `talosctl` automatically generates the configuration:
+
+```bash
+# Create a local cluster (generates config automatically)
+talosctl cluster create
+
+# Or generate config for existing infrastructure
+talosctl gen config my-cluster https://cluster-endpoint:6443
+```
+
+<Note>
+The configuration file contains sensitive authentication material. Protect it with appropriate file permissions (typically `0600`).
+</Note>
+
+## Version Management
+
+### Check Compatibility
+
+Verify version compatibility between your CLI and cluster:
+
+```bash
+# Show both client and server versions
+talosctl version
+```
+
+Output shows:
+- **Client**: Your local `talosctl` version
+- **Server**: The Talos version running on cluster nodes
+
+<Warning>
+Major version mismatches between `talosctl` and Talos nodes may cause compatibility issues. Always try to keep versions in sync.
+</Warning>
+
+### Installing Multiple Versions
+
+You can maintain multiple `talosctl` versions for different clusters:
+
+```bash
+# Install versions with explicit names
+curl -Lo /usr/local/bin/talosctl-1.12 \
+  https://github.com/siderolabs/talos/releases/download/v1.12.0/talosctl-linux-amd64
+
+curl -Lo /usr/local/bin/talosctl-1.13 \
+  https://github.com/siderolabs/talos/releases/download/v1.13.0/talosctl-linux-amd64
+
+chmod +x /usr/local/bin/talosctl-*
+
+# Use specific version
+talosctl-1.12 version --client
+talosctl-1.13 version --client
+
+# Symlink to switch default
+ln -sf /usr/local/bin/talosctl-1.13 /usr/local/bin/talosctl
+```
+
+## Updating talosctl
+
+Keep `talosctl` up to date with the latest features and bug fixes:
+
+<Tabs>
+  <Tab title="Homebrew">
+    ```bash
+    brew upgrade talosctl
+    ```
+  </Tab>
+
+  <Tab title="Installation Script">
+    ```bash
+    # Re-run the installation script
+    curl -sL https://talos.dev/install | sh
+    ```
+  </Tab>
+
+  <Tab title="Manual">
+    ```bash
+    # Download new version
+    export NEW_VERSION="v1.14.0"
+    export ARCH=$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
+    export OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+
+    curl -Lo /usr/local/bin/talosctl \
+      https://github.com/siderolabs/talos/releases/download/${NEW_VERSION}/talosctl-${OS}-${ARCH}
+
+    chmod +x /usr/local/bin/talosctl
+
+    # Verify
+    talosctl version --client
+    ```
+  </Tab>
+</Tabs>
+
+## Uninstalling talosctl
+
+To remove `talosctl` from your system:
+
+<Tabs>
+  <Tab title="Homebrew">
+    ```bash
+    brew uninstall talosctl
+    ```
+  </Tab>
+
+  <Tab title="Manual">
+    ```bash
+    # Remove binary
+    sudo rm /usr/local/bin/talosctl
+
+    # Remove configuration (optional)
+    rm -rf ~/.talos
+    ```
+  </Tab>
+
+  <Tab title="Windows">
+    ```powershell
+    # Remove binary
+    Remove-Item "$env:USERPROFILE\.talos\talosctl.exe"
+
+    # Remove from PATH
+    $installDir = "$env:USERPROFILE\.talos"
+    $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $newPath = ($currentPath -split ';' | Where-Object { $_ -ne $installDir }) -join ';'
+    [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+
+    # Remove configuration (optional)
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.talos"
+    ```
+  </Tab>
+</Tabs>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Command not found after installation">
+    The `talosctl` binary is not in your PATH. Add the installation directory to your PATH:
+
+    ```bash
+    # For bash/zsh
+    echo 'export PATH="/usr/local/bin:$PATH"' >> ~/.bashrc
+    source ~/.bashrc
+    ```
+
+    Or move the binary to a directory already in your PATH:
+
+    ```bash
+    sudo mv talosctl /usr/local/bin/
+    ```
+  </Accordion>
+
+  <Accordion title="Permission denied when installing">
+    You need elevated privileges to install to `/usr/local/bin`:
+
+    ```bash
+    sudo curl -sL https://talos.dev/install | sudo sh
+    ```
+
+    Or install to a user-writable location:
+
+    ```bash
+    curl -Lo ~/.local/bin/talosctl https://github.com/siderolabs/talos/releases/download/v1.13.0/talosctl-linux-amd64
+    chmod +x ~/.local/bin/talosctl
+    ```
+  </Accordion>
+
+  <Accordion title="Version mismatch warnings">
+    If you see warnings about version mismatches:
+
+    ```bash
+    # Check versions
+    talosctl version
+
+    # Update talosctl to match cluster version
+    curl -Lo /usr/local/bin/talosctl https://github.com/siderolabs/talos/releases/download/v1.13.0/talosctl-linux-amd64
+    chmod +x /usr/local/bin/talosctl
+    ```
+  </Accordion>
+
+  <Accordion title="Certificate/authentication errors">
+    If you encounter authentication errors:
+
+    1. Verify your config file exists:
+       ```bash
+       ls -la ~/.talos/config
+       ```
+
+    2. Check file permissions:
+       ```bash
+       chmod 600 ~/.talos/config
+       ```
+
+    3. Verify cluster endpoints:
+       ```bash
+       talosctl config info
+       ```
+
+    4. Regenerate config if needed:
+       ```bash
+       talosctl gen config my-cluster https://cluster-endpoint:6443
+       ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+Now that you have `talosctl` installed, you're ready to create and manage Talos clusters:
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Create your first local cluster in minutes using Docker.
+  </Card>
+  
+  <Card title="CLI Reference" icon="book" href="/reference/cli">
+    Explore all available talosctl commands and options.
+  </Card>
+  
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Learn about Talos machine configuration and cluster setup.
+  </Card>
+  
+  <Card title="Production Deployment" icon="server" href="/production">
+    Deploy Talos on bare metal, VMs, or cloud infrastructure.
+  </Card>
+</CardGroup>
+
+## Additional Resources
+
+- **GitHub Releases**: Download specific versions from [github.com/siderolabs/talos/releases](https://github.com/siderolabs/talos/releases)
+- **Docker Images**: Container images at [ghcr.io/siderolabs/talosctl](https://ghcr.io/siderolabs/talosctl)
+- **Source Code**: View the source at [github.com/siderolabs/talos](https://github.com/siderolabs/talos)
+- **Community Support**: Get help in [GitHub Discussions](https://github.com/siderolabs/talos/discussions)

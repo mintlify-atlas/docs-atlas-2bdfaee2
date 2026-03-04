@@ -1,0 +1,449 @@
+---
+title: NetworkConfig Reference
+description: Network configuration types for Talos Linux machines
+---
+
+Talos Linux provides multiple network configuration document types that allow granular control over networking. Modern configurations use separate document types instead of the deprecated `machine.network` section.
+
+## HostnameConfig
+
+The `HostnameConfig` document configures the machine hostname, either statically or with automatic generation.
+
+### Document Structure
+
+```yaml
+kind: HostnameConfig
+apiVersion: v1alpha1
+metadata:
+  name: hostname
+```
+
+### Configuration Fields
+
+<ParamField path="hostname" type="string">
+  Static hostname to set for the machine. This has the highest priority over other hostname sources (DHCP, cloud-init).
+  
+  **Conflicts with:** `auto` field
+  
+  ```yaml
+  kind: HostnameConfig
+  apiVersion: v1alpha1
+  hostname: controlplane-1.example.org
+  ```
+</ParamField>
+
+<ParamField path="auto" type="string">
+  Method to automatically generate a hostname for the machine.
+  
+  **Available values:**
+  - `stable` - Generates a stable hostname based on machine identity
+  - `off` - Disables automatic hostname generation; Talos waits for an external source (DHCP, cloud-init)
+  
+  **Conflicts with:** `hostname` field
+  
+  Automatic hostnames have the lowest priority over any other hostname sources.
+  
+  ```yaml
+  kind: HostnameConfig
+  apiVersion: v1alpha1
+  auto: stable
+  ```
+</ParamField>
+
+### Examples
+
+<CodeGroup>
+```yaml Static Hostname
+kind: HostnameConfig
+apiVersion: v1alpha1
+hostname: worker-33
+```
+
+```yaml Auto-Generated
+kind: HostnameConfig
+apiVersion: v1alpha1
+auto: stable
+```
+</CodeGroup>
+
+## NetworkDeviceConfig
+
+The `NetworkDeviceConfig` document (formerly the deprecated `machine.network.interfaces`) configures network interfaces on Talos machines.
+
+<Note>
+The device configuration shown in the v1alpha1 `machine.network.interfaces` section is deprecated. Use the standalone `NetworkDeviceConfig` document type instead.
+</Note>
+
+### Device Selection
+
+<ParamField path="interface" type="string">
+  The interface name (e.g., `enp0s3`). Mutually exclusive with `deviceSelector`.
+  
+  ```yaml
+  interface: enp0s3
+  ```
+</ParamField>
+
+<ParamField path="deviceSelector" type="object">
+  Select a network device using selectors with wildcard support. Mutually exclusive with `interface`.
+  
+  <Expandable title="Device Selector Fields">
+    <ParamField path="deviceSelector.busPath" type="string">
+      Match by PCI bus path with wildcard support.
+      
+      ```yaml
+      deviceSelector:
+        busPath: 00:*
+      ```
+    </ParamField>
+    
+    <ParamField path="deviceSelector.hardwareAddr" type="string">
+      Match by MAC address with wildcard support.
+      
+      ```yaml
+      deviceSelector:
+        hardwareAddr: '*:f0:ab'
+        driver: virtio
+      ```
+    </ParamField>
+    
+    <ParamField path="deviceSelector.driver" type="string">
+      Match by kernel driver name.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Address Configuration
+
+<ParamField path="addresses" type="array">
+  Static IP addresses to assign to the interface. Can be specified in CIDR notation or as standalone addresses.
+  
+  ```yaml
+  addresses:
+    - 10.5.0.10/16
+    - 192.168.3.7
+  ```
+</ParamField>
+
+<ParamField path="dhcp" type="boolean">
+  Enable DHCP for the interface. Supports these DHCP options:
+  - `OptionClasslessStaticRoute`
+  - `OptionDomainNameServer`
+  - `OptionDNSDomainSearchList`
+  - `OptionHostName`
+  
+  ```yaml
+  dhcp: true
+  ```
+</ParamField>
+
+<ParamField path="dhcpOptions" type="object">
+  DHCP-specific options (requires `dhcp: true`).
+  
+  <Expandable title="DHCP Options">
+    <ParamField path="dhcpOptions.routeMetric" type="integer">
+      Priority of all routes received via DHCP.
+      
+      ```yaml
+      dhcpOptions:
+        routeMetric: 1024
+      ```
+    </ParamField>
+    
+    <ParamField path="dhcpOptions.ipv4" type="boolean" default="true">
+      Enable DHCPv4 protocol.
+    </ParamField>
+    
+    <ParamField path="dhcpOptions.ipv6" type="boolean" default="false">
+      Enable DHCPv6 protocol.
+    </ParamField>
+    
+    <ParamField path="dhcpOptions.duidv6" type="string">
+      Set client DUID for DHCPv6 (hex string).
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Routing
+
+<ParamField path="routes" type="array">
+  Static routes associated with the interface. Appended to DHCP routes if DHCP is enabled.
+  
+  <Expandable title="Route Configuration">
+    <ParamField path="routes[].network" type="string">
+      Destination network in CIDR notation.
+    </ParamField>
+    
+    <ParamField path="routes[].gateway" type="string">
+      Gateway IP address.
+    </ParamField>
+    
+    <ParamField path="routes[].metric" type="integer">
+      Route priority/metric.
+    </ParamField>
+  </Expandable>
+  
+  ```yaml
+  routes:
+    - network: 0.0.0.0/0
+      gateway: 10.5.0.1
+      metric: 1024
+  ```
+</ParamField>
+
+<ParamField path="mtu" type="integer">
+  Interface MTU size. Overrides any MTU settings from DHCP.
+  
+  ```yaml
+  mtu: 9000
+  ```
+</ParamField>
+
+### Advanced Features
+
+<ParamField path="bond" type="object">
+  Bond-specific configuration for bonded interfaces.
+  
+  ```yaml
+  bond:
+    mode: balance-rr
+    interfaces:
+      - eth0
+      - eth1
+  ```
+</ParamField>
+
+<ParamField path="bridge" type="object">
+  Bridge-specific configuration.
+  
+  ```yaml
+  bridge:
+    stp:
+      enabled: true
+    interfaces:
+      - eth0
+      - eth1
+  ```
+</ParamField>
+
+<ParamField path="vlans" type="array">
+  VLAN configuration for the interface.
+  
+  ```yaml
+  vlans:
+    - vlanId: 100
+      addresses:
+        - 10.100.0.10/24
+  ```
+</ParamField>
+
+<ParamField path="wireguard" type="object">
+  WireGuard VPN configuration.
+  
+  <Expandable title="WireGuard Configuration">
+    <ParamField path="wireguard.privateKey" type="string">
+      Base64 encoded WireGuard private key (generated with `wg genkey`).
+    </ParamField>
+    
+    <ParamField path="wireguard.listenPort" type="integer">
+      Device listening port.
+    </ParamField>
+    
+    <ParamField path="wireguard.peers" type="array">
+      List of WireGuard peers.
+      
+      ```yaml
+      wireguard:
+        privateKey: ABCD...
+        listenPort: 51820
+        peers:
+          - publicKey: PEER_KEY...
+            endpoint: peer.example.com:51820
+            allowedIPs:
+              - 10.2.0.0/24
+      ```
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="vip" type="object">
+  Virtual (shared) IP address configuration for high availability.
+  
+  ```yaml
+  vip:
+    ip: 10.5.0.100
+  ```
+</ParamField>
+
+<ParamField path="ignore" type="boolean">
+  Skip configuration of this interface.
+  
+  ```yaml
+  ignore: true
+  ```
+</ParamField>
+
+<ParamField path="dummy" type="boolean">
+  Specify that this interface should be a virtual-only, dummy interface.
+  
+  ```yaml
+  dummy: true
+  ```
+</ParamField>
+
+### Complete Examples
+
+<CodeGroup>
+```yaml Static IP Configuration
+kind: NetworkDeviceConfig
+apiVersion: v1alpha1
+interface: eth0
+addresses:
+  - 10.5.0.10/24
+routes:
+  - network: 0.0.0.0/0
+    gateway: 10.5.0.1
+mtu: 1500
+```
+
+```yaml DHCP Configuration
+kind: NetworkDeviceConfig
+apiVersion: v1alpha1
+interface: eth0
+dhcp: true
+dhcpOptions:
+  routeMetric: 1024
+  ipv4: true
+  ipv6: false
+```
+
+```yaml Device Selector
+kind: NetworkDeviceConfig
+apiVersion: v1alpha1
+deviceSelector:
+  busPath: "00:*"
+addresses:
+  - 192.168.1.10/24
+```
+
+```yaml Bond Configuration
+kind: NetworkDeviceConfig
+apiVersion: v1alpha1
+interface: bond0
+bond:
+  mode: 802.3ad
+  lacpRate: fast
+  interfaces:
+    - eth0
+    - eth1
+addresses:
+  - 10.0.0.10/24
+```
+
+```yaml Bridge Configuration
+kind: NetworkDeviceConfig
+apiVersion: v1alpha1
+interface: br0
+bridge:
+  stp:
+    enabled: true
+  interfaces:
+    - eth0
+    - eth1
+addresses:
+  - 10.0.0.10/24
+```
+
+```yaml WireGuard VPN
+kind: NetworkDeviceConfig
+apiVersion: v1alpha1
+interface: wg0
+addresses:
+  - 10.2.0.1/24
+wireguard:
+  privateKey: AAAA...
+  listenPort: 51820
+  peers:
+    - publicKey: BBBB...
+      endpoint: peer.example.com:51820
+      persistentKeepaliveInterval: 25s
+      allowedIPs:
+        - 10.2.0.2/32
+```
+</CodeGroup>
+
+## ResolverConfig
+
+The `ResolverConfig` document (replaces deprecated `machine.network.nameservers`) configures DNS resolution.
+
+```yaml
+kind: ResolverConfig
+apiVersion: v1alpha1
+nameServers:
+  - 1.1.1.1
+  - 8.8.8.8
+searchDomains:
+  - example.com
+```
+
+## StaticHostConfig
+
+The `StaticHostConfig` document (replaces deprecated `machine.network.extraHostEntries`) adds static entries to `/etc/hosts`.
+
+```yaml
+kind: StaticHostConfig
+apiVersion: v1alpha1
+hosts:
+  - ip: 10.0.0.10
+    aliases:
+      - database.local
+      - db
+```
+
+## KubeSpanConfig
+
+The `KubeSpanConfig` document configures the KubeSpan overlay network for Talos clusters.
+
+```yaml
+kind: KubeSpanConfig
+apiVersion: v1alpha1
+enabled: true
+```
+
+## Migration from Deprecated Fields
+
+The following table shows the mapping from deprecated v1alpha1 fields to new document types:
+
+| Deprecated Field | New Document Type |
+|-----------------|-------------------|
+| `machine.network.hostname` | `HostnameConfig` |
+| `machine.network.interfaces` | `NetworkDeviceConfig` |
+| `machine.network.nameservers` | `ResolverConfig` |
+| `machine.network.searchDomains` | `ResolverConfig` |
+| `machine.network.extraHostEntries` | `StaticHostConfig` |
+| `machine.network.kubespan` | `KubeSpanConfig` |
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Device Selectors">
+    Prefer device selectors over hard-coded interface names for better portability across different hardware.
+    
+    ```yaml
+    deviceSelector:
+      driver: virtio
+    ```
+  </Accordion>
+  
+  <Accordion title="Set Appropriate MTU">
+    Configure MTU based on your network infrastructure. Use jumbo frames (9000) for high-performance networks when supported.
+  </Accordion>
+  
+  <Accordion title="Configure Redundancy">
+    Use bonding or VIP configuration for high availability scenarios.
+  </Accordion>
+  
+  <Accordion title="Separate Documents">
+    Use multi-document configuration to separate network concerns for better maintainability.
+  </Accordion>
+</AccordionGroup>

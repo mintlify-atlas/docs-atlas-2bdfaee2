@@ -1,0 +1,432 @@
+---
+title: Storage and Disk Configuration
+description: Configure storage volumes, disks, and encryption in Talos Linux
+---
+
+Talos Linux provides flexible storage configuration through volume management, disk selection, and encryption. Storage is configured using multi-document configuration.
+
+## Volume Configuration
+
+Volumes are configured using the `VolumeConfig` document type. Talos manages several system volumes:
+
+- `STATE` - System state partition (read-write)
+- `EPHEMERAL` - Ephemeral data partition (read-write)
+- `IMAGE-CACHE` - Container image cache
+
+```yaml
+---
+version: v1alpha1
+kind: VolumeConfig
+name: EPHEMERAL
+provisioning:
+  diskSelector:
+    match: system_disk
+  grow: true
+  minSize: 10GB
+```
+
+### Volume Provisioning
+
+<ParamField path="provisioning" type="object">
+  Describes how the volume is provisioned.
+</ParamField>
+
+<ParamField path="provisioning.diskSelector" type="object">
+  Select the disk for this volume using a CEL expression.
+</ParamField>
+
+<ParamField path="provisioning.grow" type="boolean">
+  Should the volume grow to the size of the disk (if possible).
+</ParamField>
+
+<ParamField path="provisioning.minSize" type="string">
+  Minimum size of the volume (e.g., `10GB`, `2.5GiB`).
+</ParamField>
+
+<ParamField path="provisioning.maxSize" type="string">
+  Maximum size of the volume. Can be in bytes or percentage (e.g., `50GiB`, `80%`).
+</ParamField>
+
+### Disk Selector
+
+Disk selectors use Common Expression Language (CEL) to match disks:
+
+```yaml
+provisioning:
+  diskSelector:
+    match: |
+      disk.size >= 120u * GB && disk.size <= 1u * TB
+```
+
+#### Disk Selector Examples
+
+**Match disks between 120GB and 1TB:**
+```yaml
+diskSelector:
+  match: |
+    disk.size >= 120u * GB && disk.size <= 1u * TB
+```
+
+**Match SATA SSDs that are not system disks:**
+```yaml
+diskSelector:
+  match: |
+    disk.transport == "sata" && 
+    !disk.rotational && 
+    !disk.system_disk
+```
+
+**Match NVMe disks:**
+```yaml
+diskSelector:
+  match: |
+    disk.transport == "nvme"
+```
+
+**Match by model:**
+```yaml
+diskSelector:
+  match: |
+    disk.model.matches("^Samsung.*")
+```
+
+#### Available Disk Properties
+
+Disk objects in CEL expressions have these properties:
+
+- `disk.size` - Disk size in bytes
+- `disk.model` - Disk model string
+- `disk.serial` - Disk serial number
+- `disk.transport` - Transport type (`sata`, `nvme`, `usb`, etc.)
+- `disk.rotational` - Boolean, true for HDDs
+- `disk.system_disk` - Boolean, true for the system disk
+- `disk.wwid` - World Wide Identifier
+- `disk.bus_path` - PCI bus path
+
+## Volume Encryption
+
+Encrypt volumes using LUKS encryption:
+
+<ParamField path="encryption" type="object">
+  Describes how the volume is encrypted.
+</ParamField>
+
+```yaml
+---
+version: v1alpha1
+kind: VolumeConfig
+name: EPHEMERAL
+provisioning:
+  diskSelector:
+    match: system_disk
+encryption:
+  provider: luks2
+  keys:
+    - static:
+        passphrase: "my-secret-passphrase"
+    - nodeID: {}
+  cipher: aes-xts-plain64
+  keySize: 512
+```
+
+### Encryption Options
+
+<ParamField path="encryption.provider" type="string">
+  Encryption provider. Currently only `luks2` is supported.
+</ParamField>
+
+<ParamField path="encryption.keys" type="array">
+  Encryption keys. Multiple keys can be configured for redundancy.
+</ParamField>
+
+<ParamField path="encryption.cipher" type="string" default="aes-xts-plain64">
+  Cipher algorithm to use.
+</ParamField>
+
+<ParamField path="encryption.keySize" type="number" default="512">
+  Key size in bits.
+</ParamField>
+
+### Encryption Key Types
+
+#### Static Passphrase
+
+```yaml
+encryption:
+  keys:
+    - static:
+        passphrase: "my-secret-passphrase"
+```
+
+<Warning>
+Static passphrases should only be used for testing. In production, use more secure key types.
+</Warning>
+
+#### Node ID Key
+
+Generated from the node's unique identifier:
+
+```yaml
+encryption:
+  keys:
+    - nodeID: {}
+```
+
+#### KMS Key
+
+Use a Key Management Service:
+
+```yaml
+encryption:
+  keys:
+    - kms:
+        endpoint: https://kms.example.com
+```
+
+#### TPM Key
+
+Use Trusted Platform Module:
+
+```yaml
+encryption:
+  keys:
+    - tpm: {}
+```
+
+## User Volumes
+
+Create additional user-managed volumes:
+
+```yaml
+---
+version: v1alpha1
+kind: UserVolumeConfig
+name: my-data
+provisioning:
+  diskSelector:
+    match: |
+      disk.size >= 500u * GB && 
+      !disk.system_disk
+  grow: true
+filesystemType: xfs
+mountPath: /var/mnt/data
+```
+
+<ParamField path="name" type="string" required>
+  Name of the user volume.
+</ParamField>
+
+<ParamField path="filesystemType" type="string" default="xfs">
+  Filesystem type: `xfs`, `ext4`, or `btrfs`.
+</ParamField>
+
+<ParamField path="mountPath" type="string" required>
+  Where to mount the volume. Must be under `/var/mnt/`.
+</ParamField>
+
+## External Volumes
+
+Mount external storage devices:
+
+```yaml
+---
+version: v1alpha1
+kind: ExternalVolumeConfig
+name: usb-storage
+provisioning:
+  diskSelector:
+    match: |
+      disk.transport == "usb"
+mountPath: /var/mnt/usb
+readOnly: false
+```
+
+<ParamField path="readOnly" type="boolean" default="false">
+  Mount the volume as read-only.
+</ParamField>
+
+## Raw Volumes
+
+Access raw block devices without a filesystem:
+
+```yaml
+---
+version: v1alpha1  
+kind: RawVolumeConfig
+name: raw-disk
+provisioning:
+  diskSelector:
+    match: |
+      disk.model == "SAMSUNG MZVL2512HCJQ"
+targetPath: /dev/sdb
+```
+
+<ParamField path="targetPath" type="string" required>
+  Stable device path to create for this volume.
+</ParamField>
+
+## Swap Configuration
+
+Configure swap space:
+
+```yaml
+---
+version: v1alpha1
+kind: SwapVolumeConfig
+name: swap
+provisioning:
+  diskSelector:
+    match: system_disk
+  minSize: 4GB
+  maxSize: 8GB
+```
+
+<Note>
+Swap is optional in Talos and typically not recommended for Kubernetes nodes.
+</Note>
+
+## ZSwap Configuration
+
+Configure compressed swap in memory:
+
+```yaml
+---
+version: v1alpha1
+kind: ZSwapConfig
+enabled: true
+compressor: zstd
+maxPoolPercent: 25
+```
+
+<ParamField path="enabled" type="boolean" required>
+  Enable ZSwap.
+</ParamField>
+
+<ParamField path="compressor" type="string" default="lzo">
+  Compression algorithm: `lzo`, `lz4`, or `zstd`.
+</ParamField>
+
+<ParamField path="maxPoolPercent" type="number" default="25">
+  Maximum percentage of memory to use for compressed swap.
+</ParamField>
+
+## Mount Options
+
+Configure volume mount security:
+
+<ParamField path="mount" type="object">
+  Additional mount options.
+</ParamField>
+
+<ParamField path="mount.secure" type="boolean" default="true">
+  Enable secure mount options (`nosuid`, `nodev`). Defaults to true for better security.
+</ParamField>
+
+```yaml
+mount:
+  secure: true
+```
+
+## Legacy Disk Configuration
+
+<Warning>
+The `machine.disks` field is deprecated. Use `UserVolumeConfig` instead for managing additional disks.
+</Warning>
+
+Old style (deprecated):
+```yaml
+machine:
+  disks:
+    - device: /dev/sdb
+      partitions:
+        - mountpoint: /var/mnt/data
+          size: 100GB
+```
+
+New style (recommended):
+```yaml
+---
+version: v1alpha1
+kind: UserVolumeConfig
+name: data
+provisioning:
+  diskSelector:
+    match: 'disk.name == "/dev/sdb"'
+  minSize: 100GB
+mountPath: /var/mnt/data
+```
+
+## Complete Storage Example
+
+```yaml
+---
+version: v1alpha1
+kind: VolumeConfig
+name: EPHEMERAL
+provisioning:
+  diskSelector:
+    match: system_disk
+  grow: true
+  minSize: 10GB
+encryption:
+  provider: luks2
+  keys:
+    - nodeID: {}
+  cipher: aes-xts-plain64
+  keySize: 512
+mount:
+  secure: true
+---
+version: v1alpha1
+kind: UserVolumeConfig  
+name: storage
+provisioning:
+  diskSelector:
+    match: |
+      disk.size >= 500u * GB && 
+      disk.transport == "nvme" &&
+      !disk.system_disk
+  grow: true
+encryption:
+  provider: luks2
+  keys:
+    - nodeID: {}
+filesystemType: xfs
+mountPath: /var/mnt/storage
+---
+version: v1alpha1
+kind: ZSwapConfig
+enabled: true
+compressor: zstd
+maxPoolPercent: 20
+```
+
+## Storage Best Practices
+
+### Disk Selection
+
+- Use CEL expressions for flexible disk matching
+- Avoid selecting system disks for user volumes
+- Consider disk transport type for performance requirements
+- Match by serial number for consistent disk assignment
+
+### Encryption
+
+- Always encrypt sensitive data volumes
+- Use multiple key slots for redundancy
+- Consider TPM for hardware-backed encryption
+- Test encryption key recovery procedures
+
+### Volume Sizing
+
+- Set appropriate `minSize` for system volumes
+- Use `maxSize` with percentages for flexible sizing
+- Enable `grow` for volumes that should expand
+- Monitor disk usage and adjust as needed
+
+### Performance
+
+- Use XFS for large files and high throughput
+- Use ext4 for general purpose workloads
+- Consider NVMe disks for performance-critical workloads
+- Separate system and data volumes when possible

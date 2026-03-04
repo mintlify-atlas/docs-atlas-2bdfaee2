@@ -1,0 +1,693 @@
+---
+title: Configuration Commands
+description: Commands for managing Talos machine configurations and talosconfig
+---
+
+## Overview
+
+Configuration commands handle both machine configurations (for Talos nodes) and client configurations (talosconfig). These commands allow you to generate, apply, and manage configurations.
+
+## gen config
+
+Generate a set of configuration files for a Talos cluster.
+
+```bash
+talosctl gen config <cluster-name> <cluster-endpoint> [flags]
+```
+
+### Description
+
+Generates machine configurations for control plane and worker nodes, along with a talosconfig file for cluster access. The cluster endpoint is the URL for the Kubernetes API server.
+
+### Arguments
+
+<ParamField path="cluster-name" type="string" required>
+  Name of the cluster
+</ParamField>
+
+<ParamField path="cluster-endpoint" type="string" required>
+  The Kubernetes API endpoint URL (e.g., https://10.5.0.1:6443)
+  
+  For a single control plane node, use port 6443. For HA setups with a load balancer, use the load balancer IP and port.
+</ParamField>
+
+### Flags
+
+<ParamField path="--output" type="string">
+  Destination for generated files
+  
+  - When multiple output types: must be a directory
+  - For single output type: can be a file path or `-` for stdout
+  - If not specified: uses current working directory
+  
+  Short flag: `-o`
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 -o ./configs
+  ```
+</ParamField>
+
+<ParamField path="--output-types" type="string[]" default="controlplane,worker,talosconfig">
+  Types of outputs to generate
+  
+  **Options:** `controlplane`, `worker`, `talosconfig`
+  
+  Short flag: `-t`
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 -t controlplane,talosconfig
+  ```
+</ParamField>
+
+<ParamField path="--install-disk" type="string" default="/dev/sda">
+  The disk to install Talos on
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 --install-disk /dev/nvme0n1
+  ```
+</ParamField>
+
+<ParamField path="--install-image" type="string">
+  The container image used to perform installation
+  
+  **Default:** Latest Talos installer image
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 \
+    --install-image ghcr.io/siderolabs/installer:v1.8.0
+  ```
+</ParamField>
+
+<ParamField path="--kubernetes-version" type="string">
+  Desired Kubernetes version to run
+  
+  **Default:** Latest supported version
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 --kubernetes-version 1.31.0
+  ```
+</ParamField>
+
+<ParamField path="--additional-sans" type="string[]">
+  Additional Subject Alternative Names for the API server certificate
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 \
+    --additional-sans api.example.com,10.5.0.10
+  ```
+</ParamField>
+
+<ParamField path="--dns-domain" type="string" default="cluster.local">
+  The DNS domain to use for the cluster
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 --dns-domain k8s.local
+  ```
+</ParamField>
+
+<ParamField path="--config-patch" type="string[]">
+  Patch generated machine configs (applied to all node types)
+  
+  Use `@file` to read a patch from file.
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 \
+    --config-patch @patch.yaml
+  ```
+</ParamField>
+
+<ParamField path="--config-patch-control-plane" type="string[]">
+  Patch generated machine configs (applied to init and controlplane types)
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 \
+    --config-patch-control-plane @cp-patch.yaml
+  ```
+</ParamField>
+
+<ParamField path="--config-patch-worker" type="string[]">
+  Patch generated machine configs (applied to worker type)
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 \
+    --config-patch-worker @worker-patch.yaml
+  ```
+</ParamField>
+
+<ParamField path="--with-docs" type="boolean" default="true">
+  Render machine configs with documentation for each field
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 --with-docs=false
+  ```
+</ParamField>
+
+<ParamField path="--with-examples" type="boolean" default="true">
+  Render machine configs with commented examples
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 --with-examples=false
+  ```
+</ParamField>
+
+<ParamField path="--with-cluster-discovery" type="boolean" default="true">
+  Enable cluster discovery feature
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 --with-cluster-discovery=false
+  ```
+</ParamField>
+
+<ParamField path="--with-kubespan" type="boolean" default="false">
+  Enable KubeSpan feature
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 --with-kubespan
+  ```
+</ParamField>
+
+<ParamField path="--with-secrets" type="string">
+  Use a secrets file generated using `talosctl gen secrets`
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 --with-secrets secrets.yaml
+  ```
+</ParamField>
+
+<ParamField path="--talos-version" type="string">
+  The desired Talos version to generate config for (backwards compatibility)
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 --talos-version v1.7.0
+  ```
+</ParamField>
+
+<ParamField path="--registry-mirror" type="string[]">
+  List of registry mirrors in format: `<registry>=<mirror-url>`
+  
+  **Example:**
+  ```bash
+  talosctl gen config my-cluster https://10.5.0.1:6443 \
+    --registry-mirror docker.io=https://registry.local
+  ```
+</ParamField>
+
+### Examples
+
+**Generate basic configuration**
+```bash
+talosctl gen config my-cluster https://10.5.0.1:6443
+```
+
+**Output:**
+```
+Created controlplane.yaml
+Created worker.yaml
+Created talosconfig
+```
+
+**Generate with custom install disk**
+```bash
+talosctl gen config my-cluster https://10.5.0.1:6443 \
+  --install-disk /dev/nvme0n1
+```
+
+**Generate with specific Kubernetes version**
+```bash
+talosctl gen config my-cluster https://10.5.0.1:6443 \
+  --kubernetes-version 1.30.0
+```
+
+**Generate with additional SANs**
+```bash
+talosctl gen config my-cluster https://api.example.com:6443 \
+  --additional-sans api.example.com,api-internal.example.com,10.5.0.10
+```
+
+**Generate control plane config only**
+```bash
+talosctl gen config my-cluster https://10.5.0.1:6443 \
+  -t controlplane \
+  -o controlplane.yaml
+```
+
+**Generate with config patches**
+```bash
+talosctl gen config my-cluster https://10.5.0.1:6443 \
+  --config-patch-control-plane @cp-patch.yaml \
+  --config-patch-worker @worker-patch.yaml
+```
+
+**Generate minimal config without docs/examples**
+```bash
+talosctl gen config my-cluster https://10.5.0.1:6443 \
+  --with-docs=false \
+  --with-examples=false
+```
+
+---
+
+## apply-config
+
+Apply a new configuration to a Talos node.
+
+```bash
+talosctl apply-config [flags]
+```
+
+### Description
+
+Applies machine configuration to one or more nodes. The configuration can be applied in different modes and can be patched on-the-fly.
+
+### Flags
+
+<ParamField path="--file" type="string" required>
+  The filename of the configuration to apply
+  
+  Short flag: `-f`
+  
+  **Example:**
+  ```bash
+  talosctl apply-config -n 10.5.0.2 -f controlplane.yaml
+  ```
+</ParamField>
+
+<ParamField path="--mode" type="string" default="auto">
+  Apply configuration mode
+  
+  **Options:**
+  - `auto` - Automatically determine the mode
+  - `no-reboot` - Apply without rebooting
+  - `reboot` - Reboot after applying
+  - `staged` - Stage for next reboot
+  - `try` - Try the config with automatic rollback
+  
+  Short flag: `-m`
+  
+  **Example:**
+  ```bash
+  talosctl apply-config -n 10.5.0.2 -f worker.yaml --mode no-reboot
+  ```
+</ParamField>
+
+<ParamField path="--insecure" type="boolean" default="false">
+  Apply config using the insecure (encrypted with no auth) maintenance service
+  
+  Short flag: `-i`
+  
+  **Example:**
+  ```bash
+  talosctl apply-config -n 10.5.0.2 -f worker.yaml --insecure
+  ```
+</ParamField>
+
+<ParamField path="--dry-run" type="boolean" default="false">
+  Check how the config change will be applied in dry-run mode
+  
+  **Example:**
+  ```bash
+  talosctl apply-config -n 10.5.0.2 -f worker.yaml --dry-run
+  ```
+</ParamField>
+
+<ParamField path="--config-patch" type="string[]">
+  List of config patches to apply to the local config file before sending
+  
+  Short flag: `-p`
+  
+  **Example:**
+  ```bash
+  talosctl apply-config -n 10.5.0.2 -f worker.yaml -p @patch.yaml
+  ```
+</ParamField>
+
+<ParamField path="--cert-fingerprint" type="string[]">
+  List of server certificate fingerprints to accept (for insecure mode)
+  
+  **Example:**
+  ```bash
+  talosctl apply-config -n 10.5.0.2 -f worker.yaml \
+    --insecure \
+    --cert-fingerprint xA3mVkKL....
+  ```
+</ParamField>
+
+<ParamField path="--timeout" type="duration" default="1m">
+  Config will be rolled back after specified timeout (if try mode is selected)
+  
+  **Example:**
+  ```bash
+  talosctl apply-config -n 10.5.0.2 -f worker.yaml --mode try --timeout 5m
+  ```
+</ParamField>
+
+### Examples
+
+**Apply configuration to a node**
+```bash
+talosctl apply-config -n 10.5.0.2 -f controlplane.yaml
+```
+
+**Apply in maintenance/insecure mode**
+```bash
+talosctl apply-config -n 10.5.0.2 -f worker.yaml --insecure
+```
+
+**Dry run to preview changes**
+```bash
+talosctl apply-config -n 10.5.0.2 -f controlplane.yaml --dry-run
+```
+
+**Apply without rebooting**
+```bash
+talosctl apply-config -n 10.5.0.2 -f worker.yaml --mode no-reboot
+```
+
+**Try mode with automatic rollback**
+```bash
+talosctl apply-config -n 10.5.0.2 -f worker.yaml --mode try --timeout 5m
+```
+
+**Apply with inline patch**
+```bash
+talosctl apply-config -n 10.5.0.2 -f worker.yaml \
+  -p '[{"op": "add", "path": "/machine/kubelet/extraArgs", "value": {"rotate-server-certificates": "true"}}]'
+```
+
+**Output:**
+```
+mode: Auto
+ * Applied configuration without a reboot
+```
+
+---
+
+## config
+
+Manage the client configuration file (talosconfig).
+
+```bash
+talosctl config <subcommand> [flags]
+```
+
+### Subcommands
+
+### config endpoint
+
+Set the endpoint(s) for the current context.
+
+```bash
+talosctl config endpoint <endpoint>... [flags]
+```
+
+**Example:**
+```bash
+talosctl config endpoint 10.5.0.1 10.5.0.2
+```
+
+### config node
+
+Set the node(s) for the current context.
+
+```bash
+talosctl config node <node>... [flags]
+```
+
+**Example:**
+```bash
+talosctl config node 10.5.0.2 10.5.0.3
+```
+
+### config context
+
+Set the current context.
+
+```bash
+talosctl config context <context> [flags]
+```
+
+**Example:**
+```bash
+talosctl config context production
+```
+
+### config contexts
+
+List all defined contexts.
+
+```bash
+talosctl config contexts
+```
+
+**Example Output:**
+```
+CURRENT  NAME        ENDPOINTS            NODES
+*        production  10.5.0.1,10.5.0.2    10.5.0.2,10.5.0.3,10.5.0.4
+         staging     10.6.0.1             10.6.0.2,10.6.0.3
+```
+
+### config add
+
+Add a new context to the talosconfig.
+
+```bash
+talosctl config add <context> [flags]
+```
+
+**Flags:**
+
+<ParamField path="--ca" type="string">
+  Path to the CA certificate
+</ParamField>
+
+<ParamField path="--crt" type="string">
+  Path to the certificate
+</ParamField>
+
+<ParamField path="--key" type="string">
+  Path to the key (required if --crt is specified)
+</ParamField>
+
+**Example:**
+```bash
+talosctl config add production \
+  --ca ca.crt \
+  --crt client.crt \
+  --key client.key
+```
+
+### config remove
+
+Remove context(s) from the talosconfig.
+
+```bash
+talosctl config remove <context> [flags]
+```
+
+**Flags:**
+
+<ParamField path="--noconfirm" type="boolean" default="false">
+  Do not ask for confirmation
+  
+  Short flag: `-y`
+</ParamField>
+
+<ParamField path="--dry-run" type="boolean" default="false">
+  Dry run mode
+</ParamField>
+
+**Example:**
+```bash
+talosctl config remove old-cluster -y
+```
+
+### config merge
+
+Merge additional contexts from another talosconfig file.
+
+```bash
+talosctl config merge <from> [flags]
+```
+
+**Example:**
+```bash
+talosctl config merge ./other-talosconfig
+```
+
+### config new
+
+Generate a new client configuration file.
+
+```bash
+talosctl config new [<path>] [flags]
+```
+
+**Flags:**
+
+<ParamField path="--roles" type="string[]" default="os:admin">
+  Roles for the generated certificate
+  
+  **Example:**
+  ```bash
+  talosctl config new ./new-config --roles os:reader
+  ```
+</ParamField>
+
+<ParamField path="--crt-ttl" type="duration" default="87600h">
+  Certificate TTL
+  
+  **Example:**
+  ```bash
+  talosctl config new ./new-config --crt-ttl 8760h
+  ```
+</ParamField>
+
+**Example:**
+```bash
+talosctl -n 10.5.0.2 config new ./operator-config --roles os:operator
+```
+
+### config info
+
+Show information about the current context.
+
+```bash
+talosctl config info [flags]
+```
+
+**Flags:**
+
+<ParamField path="--output" type="string" default="text">
+  Output format (text, json, yaml)
+  
+  Short flag: `-o`
+</ParamField>
+
+**Example:**
+```bash
+talosctl config info
+```
+
+**Output:**
+```
+Current context:     production
+Nodes:               10.5.0.2, 10.5.0.3, 10.5.0.4
+Endpoints:           10.5.0.1, 10.5.0.2
+Roles:               os:admin
+Certificate expires: 9 years from now (2033-01-15)
+```
+
+---
+
+## Common Workflows
+
+### Initial Cluster Setup
+
+**Generate configurations**
+```bash
+talosctl gen config my-cluster https://10.5.0.1:6443 \
+  --output ./configs \
+  --install-disk /dev/sda \
+  --additional-sans 10.5.0.1,api.example.com
+```
+
+**Apply to first control plane node (maintenance mode)**
+```bash
+talosctl apply-config \
+  --nodes 10.5.0.2 \
+  --file ./configs/controlplane.yaml \
+  --insecure
+```
+
+**Configure talosconfig**
+```bash
+export TALOSCONFIG=./configs/talosconfig
+talosctl config endpoint 10.5.0.2
+talosctl config node 10.5.0.2
+```
+
+**Bootstrap etcd**
+```bash
+talosctl bootstrap
+```
+
+### Configuration Updates
+
+**Test configuration change with dry-run**
+```bash
+talosctl apply-config -n 10.5.0.2 -f updated-config.yaml --dry-run
+```
+
+**Apply with try mode (automatic rollback)**
+```bash
+talosctl apply-config -n 10.5.0.2 -f updated-config.yaml --mode try --timeout 5m
+```
+
+**Apply configuration patch**
+```bash
+talosctl apply-config -n 10.5.0.2 -f controlplane.yaml -p @patch.yaml
+```
+
+### Managing Multiple Clusters
+
+**Add new cluster context**
+```bash
+talosctl config add staging --ca ca.crt --crt client.crt --key client.key
+talosctl config endpoint 10.6.0.1
+talosctl config node 10.6.0.2 10.6.0.3
+```
+
+**Switch between clusters**
+```bash
+talosctl config context staging
+talosctl version
+
+talosctl config context production  
+talosctl version
+```
+
+**List all contexts**
+```bash
+talosctl config contexts
+```
+
+### Generate Configurations with Patches
+
+**Create patch file (patch.yaml)**
+```yaml
+machine:
+  kubelet:
+    extraArgs:
+      rotate-server-certificates: "true"
+  time:
+    servers:
+      - time.cloudflare.com
+```
+
+**Generate with patch**
+```bash
+talosctl gen config my-cluster https://10.5.0.1:6443 \
+  --config-patch @patch.yaml
+```
+
+## See Also
+
+- [CLI Overview](/cli/overview) - Installation and basic usage
+- [Cluster Commands](/cli/cluster-commands) - Cluster management
+- [Node Commands](/cli/node-commands) - Node operations

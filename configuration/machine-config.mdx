@@ -1,0 +1,417 @@
+---
+title: Machine Configuration
+description: Machine-specific configuration for Talos Linux nodes
+---
+
+Machine configuration defines node-specific settings including the machine type, installation parameters, kubelet configuration, and node-level customizations.
+
+## Machine Type
+
+Every node must specify its role in the cluster:
+
+<ParamField path="machine.type" type="string" required>
+  The role of the machine within the cluster.
+  
+  **Control Plane**: Hosts etcd and Kubernetes control plane components (API server, controller manager, scheduler).
+  
+  **Worker**: Compute node for scheduling workloads.
+  
+  <Expandable title="values">
+    - `controlplane` - Control plane node
+    - `worker` - Worker node
+  </Expandable>
+</ParamField>
+
+```yaml
+machine:
+  type: controlplane  # or worker
+```
+
+## Machine Token and CA
+
+Machines join the cluster PKI using a token and certificate authority:
+
+<ParamField path="machine.token" type="string" required>
+  Token used by a machine to join the cluster PKI. The machine creates a certificate signing request (CSR) using this token to obtain its identity certificate.
+  
+  <Warning>Ensure this token is correct as machine certificates have a short TTL by default.</Warning>
+</ParamField>
+
+<ParamField path="machine.ca" type="object">
+  The root certificate authority of the PKI. Base64 encoded certificate and key.
+  
+  <Expandable title="properties">
+    <ParamField path="crt" type="string" required>
+      Base64 encoded certificate
+    </ParamField>
+    <ParamField path="key" type="string" required>
+      Base64 encoded private key
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+```yaml
+machine:
+  token: "328hom.uqjzh6jnn2eie9oi"
+  ca:
+    crt: LS0tLS1CRUdJTi...
+    key: LS0tLS1CRUdJTi...
+```
+
+## Certificate SANs
+
+<ParamField path="machine.certSANs" type="array">
+  Extra certificate subject alternative names for the machine's certificate. By default, all non-loopback interface IPs are automatically added to the certificate's SANs.
+</ParamField>
+
+```yaml
+machine:
+  certSANs:
+    - 10.0.0.10
+    - 172.16.0.10  
+    - node1.example.com
+```
+
+## Control Plane Configuration
+
+Control plane nodes can have additional configuration:
+
+<ParamField path="machine.controlPlane" type="object">
+  Machine-specific control plane configuration options.
+</ParamField>
+
+```yaml
+machine:
+  controlPlane:
+    controllerManager:
+      disabled: false
+    scheduler:
+      disabled: false
+```
+
+### Disabling Components
+
+<ParamField path="machine.controlPlane.controllerManager.disabled" type="boolean" default="false">
+  Disable kube-controller-manager on this specific control plane node.
+</ParamField>
+
+<ParamField path="machine.controlPlane.scheduler.disabled" type="boolean" default="false">
+  Disable kube-scheduler on this specific control plane node.
+</ParamField>
+
+## Kubelet Configuration
+
+Configure the kubelet running on the machine:
+
+<ParamField path="machine.kubelet" type="object">
+  Kubelet configuration options.
+</ParamField>
+
+```yaml
+machine:
+  kubelet:
+    image: ghcr.io/siderolabs/kubelet:v1.30.0
+    clusterDNS:
+      - 10.96.0.10
+      - 169.254.2.53
+    extraArgs:
+      rotate-server-certificates: "true"
+      feature-gates: "ServerSideApply=true"
+    registerWithFQDN: true
+```
+
+### Kubelet Options
+
+<ParamField path="machine.kubelet.image" type="string">
+  Optional reference to an alternative kubelet image.
+</ParamField>
+
+<ParamField path="machine.kubelet.clusterDNS" type="array">
+  Alternative kubelet clusterDNS IP list. Overrides the default DNS service IPs.
+</ParamField>
+
+<ParamField path="machine.kubelet.extraArgs" type="object">
+  Additional flags to pass to the kubelet. Values can be strings or arrays of strings.
+</ParamField>
+
+<ParamField path="machine.kubelet.extraMounts" type="array">
+  Additional mounts for the kubelet container. Either `bind` or `rbind` are required in the options.
+</ParamField>
+
+<ParamField path="machine.kubelet.extraConfig" type="object">
+  Kubelet configuration overrides. Some fields like authentication, authorization, cgroups configuration, and ports cannot be overridden.
+</ParamField>
+
+<ParamField path="machine.kubelet.registerWithFQDN" type="boolean" default="false">
+  Force kubelet to use the node FQDN for registration. Required in clouds like AWS.
+</ParamField>
+
+<ParamField path="machine.kubelet.nodeIP.validSubnets" type="array">
+  Networks to pick kubelet node IP from. For dual stack, specify one IPv4 and one IPv6 subnet. Use `!` prefix for negative matches.
+</ParamField>
+
+```yaml
+machine:
+  kubelet:
+    nodeIP:
+      validSubnets:
+        - 10.0.0.0/8
+        - "!10.0.0.3/32"
+        - fdc7::/16
+```
+
+<ParamField path="machine.kubelet.skipNodeRegistration" type="boolean" default="false">
+  Run kubelet without registering with the API server. Runs kubelet standalone and only runs static pods.
+</ParamField>
+
+## Installation Configuration
+
+Define how Talos is installed on the machine:
+
+<ParamField path="machine.install" type="object">
+  Installation options for preparing the node.
+  
+  <Note>
+  This configuration section is silently ignored by pre-installed Talos images. To ensure installation according to config, boot with ISO or PXE.
+  </Note>
+</ParamField>
+
+```yaml
+machine:
+  install:
+    disk: /dev/sda
+    image: ghcr.io/siderolabs/installer:v1.8.0
+    wipe: true
+```
+
+### Installation Options
+
+<ParamField path="machine.install.disk" type="string">
+  The disk used for installation (e.g., `/dev/sda`, `/dev/nvme0`).
+</ParamField>
+
+<ParamField path="machine.install.diskSelector" type="object">
+  Look up disk using attributes like model, size, serial. Always has priority over `disk`.
+</ParamField>
+
+```yaml
+machine:
+  install:
+    diskSelector:
+      size: ">= 100GB"
+      model: "WDC*"
+      type: nvme
+```
+
+<ParamField path="machine.install.image" type="string">
+  The installer image to use. Find image references for each release on [GitHub releases](https://github.com/siderolabs/talos/releases).
+</ParamField>
+
+<ParamField path="machine.install.wipe" type="boolean" default="true">
+  Indicates if the installation disk should be wiped at installation time.
+</ParamField>
+
+<ParamField path="machine.install.legacyBIOSSupport" type="boolean" default="false">
+  Mark MBR partition as bootable (active). Enable only for systems with legacy BIOS that don't support GPT partitioning.
+</ParamField>
+
+## Files
+
+Add custom files to the machine:
+
+<ParamField path="machine.files" type="array">
+  User-specified files to create on the machine.
+</ParamField>
+
+```yaml
+machine:
+  files:
+    - content: |
+        [Unit]
+        Description=Custom service
+        [Service]
+        Type=oneshot
+        ExecStart=/bin/echo Hello
+      permissions: 0o644
+      path: /var/etc/custom.service
+      op: create
+```
+
+### File Options
+
+<ParamField path="machine.files[].content" type="string" required>
+  The file contents. Not required to be base64 encoded.
+</ParamField>
+
+<ParamField path="machine.files[].permissions" type="number" required>
+  The file permissions in octal format.
+</ParamField>
+
+<ParamField path="machine.files[].path" type="string" required>
+  The file path relative to `/var`.
+</ParamField>
+
+<ParamField path="machine.files[].op" type="string" required>
+  The operation to perform:
+  - `create` - Path must not exist
+  - `overwrite` - Path must be a valid file  
+  - `append` - Append to existing file
+</ParamField>
+
+## System Configuration
+
+### Sysctls
+
+<ParamField path="machine.sysctls" type="object">
+  Kernel sysctl parameters.
+</ParamField>
+
+```yaml
+machine:
+  sysctls:
+    kernel.domainname: talos.dev
+    net.ipv4.ip_forward: "1"
+    net/ipv6/conf/eth0.100/disable_ipv6: "1"
+```
+
+### Sysfs
+
+<ParamField path="machine.sysfs" type="object">
+  Sysfs parameters.
+</ParamField>
+
+```yaml
+machine:
+  sysfs:
+    devices.system.cpu.cpu0.cpufreq.scaling_governor: performance
+```
+
+## Node Labels and Taints
+
+<ParamField path="machine.nodeLabels" type="object">
+  Kubernetes node labels for the machine.
+  
+  <Note>
+  Worker nodes are restricted to set labels with certain prefixes by the NodeRestriction admission plugin.
+  </Note>
+</ParamField>
+
+<ParamField path="machine.nodeAnnotations" type="object">
+  Kubernetes node annotations for the machine.
+</ParamField>
+
+<ParamField path="machine.nodeTaints" type="object">
+  Kubernetes node taints for the machine. Effect is optional.
+  
+  <Note>
+  Worker nodes are not allowed to modify taints by the NodeRestriction admission plugin.
+  </Note>
+</ParamField>
+
+```yaml
+machine:
+  nodeLabels:
+    rack: r13a25
+    environment: production
+  nodeAnnotations:
+    customer.io/rack: r13a25
+  nodeTaints:
+    special: "true:NoSchedule"
+```
+
+## Features
+
+<ParamField path="machine.features" type="object">
+  Individual Talos features that can be enabled or disabled.
+</ParamField>
+
+```yaml
+machine:
+  features:
+    rbac: true
+    stableHostname: true
+    kubernetesTalosAPIAccess:
+      enabled: true
+      allowedRoles:
+        - os:reader
+      allowedKubernetesNamespaces:
+        - kube-system
+```
+
+## Logging
+
+<ParamField path="machine.logging" type="object">
+  Configure the logging system.
+</ParamField>
+
+```yaml
+machine:
+  logging:
+    destinations:
+      - endpoint: tcp://192.168.1.50:5140
+        format: json_lines
+```
+
+## Kernel Configuration
+
+<ParamField path="machine.kernel" type="object">
+  Kernel configuration including modules to load.
+</ParamField>
+
+```yaml
+machine:
+  kernel:
+    modules:
+      - name: btrfs
+      - name: br_netfilter
+```
+
+## Example: Control Plane
+
+```yaml
+version: v1alpha1
+machine:
+  type: controlplane
+  token: abc123.def456ghi789jkl
+  ca:
+    crt: LS0tLS...
+    key: LS0tLS...
+  certSANs:
+    - 192.168.1.100
+    - cp.example.com
+  kubelet:
+    extraArgs:
+      rotate-server-certificates: "true"
+    nodeIP:
+      validSubnets:
+        - 192.168.1.0/24
+  install:
+    disk: /dev/sda
+    image: ghcr.io/siderolabs/installer:v1.8.0
+    wipe: true
+  nodeLabels:
+    node-role.kubernetes.io/control-plane: ""
+```
+
+## Example: Worker
+
+```yaml
+version: v1alpha1
+machine:
+  type: worker
+  token: abc123.def456ghi789jkl
+  ca:
+    crt: LS0tLS...
+  certSANs:
+    - 192.168.1.101
+  kubelet:
+    extraArgs:
+      max-pods: "250"
+  install:
+    disk: /dev/nvme0n1
+    image: ghcr.io/siderolabs/installer:v1.8.0
+  nodeLabels:
+    workload-type: general
+  nodeTaints:
+    dedicated: workers:NoSchedule
+```

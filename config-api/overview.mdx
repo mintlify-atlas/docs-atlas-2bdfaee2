@@ -1,0 +1,160 @@
+---
+title: Configuration API Overview
+description: Understanding Talos Linux configuration schema and versioning
+---
+
+The Talos Linux Configuration API defines the structure and types used to configure Talos machines and clusters. Configuration is expressed through versioned, structured documents that describe machine behavior, cluster settings, and system resources.
+
+## Schema Versioning
+
+Talos configuration uses a versioned schema approach to maintain backward compatibility while allowing the system to evolve.
+
+### Current Version: v1alpha1
+
+The primary configuration version is `v1alpha1`, which contains most configuration options. All configuration documents must specify their version:
+
+```yaml
+version: v1alpha1
+kind: Config
+```
+
+### Multi-Document Configuration
+
+Modern Talos configurations support multiple documents in a single file. This allows separation of concerns:
+
+- **v1alpha1.Config** - Main machine and cluster configuration
+- **Network Documents** - HostnameConfig, NetworkDeviceConfig, ResolverConfig
+- **Block Storage Documents** - UserVolumeConfig, VolumeConfig, ExistingVolumeConfig
+- **Runtime Documents** - Various runtime configuration types
+
+Multiple documents are separated by `---` in YAML format.
+
+## Configuration Structure
+
+The root `Config` document contains two primary sections:
+
+<CardGroup cols={2}>
+  <Card title="MachineConfig" icon="server" href="/config-api/machine-config">
+    Machine-specific settings including networking, installation, and kubelet configuration
+  </Card>
+  <Card title="ClusterConfig" icon="diagram-project" href="/config-api/cluster-config">
+    Cluster-wide settings including control plane, networking, and Kubernetes components
+  </Card>
+</CardGroup>
+
+## Configuration Generation
+
+Talos provides tools to generate valid configurations:
+
+```bash
+# Generate a new configuration
+talosctl gen config my-cluster https://controlplane.example.com:6443
+
+# Generate with custom options
+talosctl gen config my-cluster https://controlplane.example.com:6443 \
+  --kubernetes-version 1.28.0 \
+  --install-disk /dev/sda
+```
+
+## Configuration Validation
+
+All configuration types implement validation to ensure correctness:
+
+- **Required fields** - Certain fields must be present
+- **Type validation** - Values must match expected types and constraints
+- **Cross-field validation** - Some fields have dependencies or conflicts
+- **Runtime validation** - Some checks are mode-specific (container, cloud, metal)
+
+## Configuration Application
+
+Configurations can be applied in multiple ways:
+
+### During Installation
+
+Configuration is provided during initial installation:
+
+```bash
+talosctl apply-config --insecure --nodes 192.168.1.10 --file controlplane.yaml
+```
+
+### Runtime Updates
+
+Many configuration changes can be applied at runtime without reboots:
+
+```bash
+talosctl apply-config --nodes controlplane-1 --file updated-config.yaml
+```
+
+### Configuration Patches
+
+Partial updates using JSON patches:
+
+```bash
+talosctl patch machineconfig --nodes controlplane-1 --patch @patch.yaml
+```
+
+## Configuration Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Machine Selectors">
+    Use device selectors instead of hard-coded interface names for better portability across hardware.
+  </Accordion>
+  
+  <Accordion title="Manage Secrets Securely">
+    Never commit raw secrets to version control. Use secret management tools or generate fresh secrets per environment.
+  </Accordion>
+  
+  <Accordion title="Validate Before Applying">
+    Always validate configurations before applying to production systems.
+  </Accordion>
+  
+  <Accordion title="Use Multi-Document Format">
+    Prefer the newer multi-document format for better modularity and to avoid deprecated fields.
+  </Accordion>
+</AccordionGroup>
+
+## Document Types Reference
+
+### Core Configuration
+
+- **Config (v1alpha1)** - Root configuration document containing machine and cluster config
+
+### Network Configuration
+
+- **HostnameConfig** - Static or auto-generated hostname configuration
+- **NetworkDeviceConfig** - Network interface configuration
+- **ResolverConfig** - DNS resolver configuration
+- **StaticHostConfig** - Static /etc/hosts entries
+- **KubeSpanConfig** - KubeSpan overlay network configuration
+
+### Storage Configuration
+
+- **UserVolumeConfig** - User-managed volumes and partitions
+- **VolumeConfig** - System volume configuration
+- **ExistingVolumeConfig** - Mount existing volumes
+- **RawVolumeConfig** - Raw volume mounting
+- **SwapVolumeConfig** - Swap space configuration
+
+### Runtime Configuration
+
+- **EnvironmentConfig** - Environment variables
+- **TimeSyncConfig** - Time synchronization
+- **ExtensionServiceConfig** - System extensions
+- **KmsgLogConfig** - Kernel message logging
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Machine Configuration" icon="server" href="/config-api/machine-config">
+    Explore machine-specific configuration options
+  </Card>
+  <Card title="Cluster Configuration" icon="diagram-project" href="/config-api/cluster-config">
+    Learn about cluster-wide settings
+  </Card>
+  <Card title="Network Configuration" icon="network-wired" href="/config-api/network-config">
+    Configure networking for your machines
+  </Card>
+  <Card title="Block Storage" icon="hard-drive" href="/config-api/block-storage">
+    Set up disks and volumes
+  </Card>
+</CardGroup>

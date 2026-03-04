@@ -1,0 +1,397 @@
+---
+title: System Extensions
+description: Extend Talos Linux with system extensions and custom functionality
+---
+
+Talos Linux supports system extensions to add additional functionality like hardware drivers, container runtimes, and other system-level components. Extensions are loaded at boot time and run alongside core Talos services.
+
+## What are Extensions?
+
+System extensions are OCI container images that contain:
+- Kernel modules
+- Firmware files
+- System binaries and libraries
+- Extension services
+- Configuration files
+
+Extensions extend the base Talos system without modifying the core OS image.
+
+## Installing Extensions
+
+Extensions are included in the Talos installer image using the Image Factory or by building a custom installer.
+
+### Using Image Factory
+
+The recommended way to install extensions is using the Talos Image Factory:
+
+1. Visit the [Image Factory](https://factory.talos.dev)
+2. Select your Talos version
+3. Choose the extensions you need
+4. Generate a custom installer image URL
+
+```yaml
+machine:
+  install:
+    image: factory.talos.dev/installer/<version>:v1.8.0
+```
+
+### Common Extensions
+
+Popular system extensions include:
+
+- **qemu-guest-agent** - QEMU guest agent for VM management
+- **iscsi-tools** - iSCSI initiator tools
+- **util-linux-tools** - Additional Linux utilities
+- **usb-modem-drivers** - USB modem drivers  
+- **nvidia-container-toolkit** - NVIDIA GPU support
+- **intel-ice-firmware** - Intel E810 network card firmware
+- **drbd** - DRBD kernel module
+- **zfs** - ZFS filesystem support
+
+## Extension Service Configuration
+
+Configure services provided by extensions using `ExtensionServiceConfig` documents:
+
+```yaml
+---
+version: v1alpha1
+kind: ExtensionServiceConfig
+name: nut-client
+configFiles:
+  - content: |
+      MONITOR ups@192.168.1.10 1 monuser password slave
+      SHUTDOWNCMD "/sbin/poweroff"
+    mountPath: /usr/local/etc/nut/upsmon.conf
+environment:
+  - NUT_UPS=ups@192.168.1.10
+```
+
+### Extension Service Options
+
+<ParamField path="name" type="string" required>
+  Name of the extension service to configure.
+</ParamField>
+
+<ParamField path="configFiles" type="array">
+  Configuration files for the extension service.
+</ParamField>
+
+<ParamField path="environment" type="array">
+  Environment variables for the extension service.
+</ParamField>
+
+### Configuration Files
+
+<ParamField path="configFiles[].content" type="string" required>
+  The content of the configuration file.
+</ParamField>
+
+<ParamField path="configFiles[].mountPath" type="string" required>
+  Where to mount the configuration file in the extension container.
+</ParamField>
+
+```yaml
+configFiles:
+  - content: |
+      # Configuration content
+      option = value
+    mountPath: /etc/myextension/config.conf
+```
+
+## Creating Custom Extensions
+
+Create custom extensions to add functionality specific to your environment.
+
+### Extension Structure
+
+An extension is an OCI container image with:
+
+1. **manifest.yaml** - Extension metadata
+2. **rootfs/** - Files to overlay on the system
+3. **/lib/modules/** - Kernel modules (optional)
+4. **/lib/firmware/** - Firmware files (optional)
+5. **extension-service.yaml** - Service definition (optional)
+
+### Example Extension Manifest
+
+```yaml
+version: v1alpha1
+metadata:
+  name: my-extension
+  version: "1.0.0"
+  author: "My Company"
+  description: "Custom extension for my hardware"
+  compatibility:
+    talos:
+      version: ">= v1.7.0"
+```
+
+### Building Extensions
+
+Use the `bldr` tool or build manually:
+
+```dockerfile
+FROM scratch AS extension
+
+COPY --from=build /rootfs /
+COPY manifest.yaml /
+```
+
+### Extension Service Definition
+
+Define a service to run in the extension:
+
+```yaml
+name: my-service
+container:
+  entrypoint: /usr/local/bin/my-daemon
+  environment:
+    - LOG_LEVEL=info
+  mounts:
+    - destination: /dev
+      source: /dev
+      type: bind
+      options:
+        - bind
+        - rshared
+        - rw
+depends:
+  - service: cri
+  - path: /run/machined/machined.sock
+restart: always
+```
+
+## GPU Support (NVIDIA)
+
+Configure NVIDIA GPU support:
+
+```yaml
+machine:
+  install:
+    # Use image with NVIDIA extension
+    image: factory.talos.dev/installer/nvidia:v1.8.0
+  
+  kernel:
+    modules:
+      - name: nvidia
+      - name: nvidia_uvm
+      - name: nvidia_drm
+      - name: nvidia_modeset
+  
+  sysctls:
+    # Required for NVIDIA
+    vm.max_map_count: "262144"
+---
+version: v1alpha1
+kind: ExtensionServiceConfig
+name: nvidia-container-toolkit
+environment:
+  - NVIDIA_VISIBLE_DEVICES=all
+  - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+```
+
+## ZFS Support
+
+Enable ZFS filesystem support:
+
+```yaml
+machine:
+  install:
+    image: factory.talos.dev/installer/zfs:v1.8.0
+  
+  kernel:
+    modules:
+      - name: zfs
+```
+
+Create ZFS pools after installation:
+
+```bash
+# Create pool
+talosctl shell
+zpool create tank /dev/sdb
+
+# Create dataset  
+zfs create tank/data
+
+# Set mountpoint
+zfs set mountpoint=/var/mnt/data tank/data
+```
+
+## iSCSI Configuration
+
+Configure iSCSI initiator:
+
+```yaml
+machine:
+  install:
+    image: factory.talos.dev/installer/iscsi-tools:v1.8.0
+---
+version: v1alpha1
+kind: ExtensionServiceConfig
+name: iscsi
+configFiles:
+  - content: |
+      InitiatorName=iqn.2024-01.com.example:node1
+    mountPath: /etc/iscsi/initiatorname.iscsi
+  - content: |
+      node.startup = automatic
+      node.session.auth.authmethod = CHAP
+      node.session.auth.username = myuser
+      node.session.auth.password = mypassword
+    mountPath: /etc/iscsi/iscsid.conf
+```
+
+## QEMU Guest Agent
+
+Enable QEMU guest agent for VM management:
+
+```yaml
+machine:
+  install:
+    image: factory.talos.dev/installer/qemu-guest-agent:v1.8.0
+```
+
+The QEMU guest agent runs automatically when the extension is installed.
+
+## Debugging Extensions
+
+### Check Extension Status
+
+```bash
+# List loaded extensions
+talosctl get extensions
+
+# Check extension service status
+talosctl service ext-<extension-name>
+
+# View extension service logs
+talosctl logs ext-<extension-name>
+```
+
+### Extension Logs
+
+Extension services log to the system journal:
+
+```bash
+talosctl dmesg | grep extension
+talosctl logs system-extension-<name>
+```
+
+## Extension Best Practices
+
+### Version Compatibility
+
+<Warning>
+Always ensure extensions are compatible with your Talos version. Extensions built for one version may not work with another.
+</Warning>
+
+- Use Image Factory to match extensions with Talos versions
+- Test extensions in non-production environments first
+- Check extension compatibility matrix
+
+### Security Considerations
+
+- Only install extensions from trusted sources
+- Review extension source code when possible
+- Minimize the number of extensions
+- Keep extensions updated
+
+### Performance Impact
+
+- Extensions add to boot time
+- Some extensions consume system resources
+- Monitor system performance after adding extensions
+- Disable unused extensions
+
+### Configuration Management
+
+- Store extension configurations in version control
+- Use GitOps for extension deployment
+- Document why each extension is needed
+- Regularly audit installed extensions
+
+## Extension Repository
+
+Official Talos extensions are maintained in the [extensions repository](https://github.com/siderolabs/extensions).
+
+To request new extensions:
+1. Check if the extension already exists
+2. Open an issue describing the use case
+3. Provide hardware/software details
+4. Consider contributing the extension
+
+## Example: Complete Extension Setup
+
+```yaml
+---
+version: v1alpha1
+machine:
+  install:
+    # Custom image with multiple extensions
+    image: factory.talos.dev/installer/nvidia,iscsi-tools,qemu-guest-agent:v1.8.0
+  
+  kernel:
+    modules:
+      - name: nvidia
+      - name: nvidia_uvm
+      - name: iscsi_tcp
+  
+  files:
+    - content: |
+        #!/bin/bash
+        # Post-installation script
+        zpool import -a
+      path: /var/etc/startup.sh
+      permissions: 0o755
+      op: create
+---
+version: v1alpha1
+kind: ExtensionServiceConfig
+name: nvidia-container-toolkit  
+environment:
+  - NVIDIA_VISIBLE_DEVICES=all
+  - NVIDIA_DRIVER_CAPABILITIES=all
+---
+version: v1alpha1
+kind: ExtensionServiceConfig
+name: iscsi
+configFiles:
+  - content: |
+      InitiatorName=iqn.2024-01.com.example:node1
+    mountPath: /etc/iscsi/initiatorname.iscsi
+```
+
+## Troubleshooting
+
+### Extension Not Loading
+
+1. Verify extension is included in installer image
+2. Check Talos version compatibility  
+3. Review extension manifest
+4. Check for conflicting extensions
+
+### Service Not Starting
+
+1. Check service dependencies are met
+2. Verify configuration files are valid
+3. Check for missing kernel modules
+4. Review service logs
+
+### Performance Issues
+
+1. Monitor resource usage
+2. Check extension service logs
+3. Consider disabling unused extensions
+4. Review extension configuration
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Image Factory" icon="industry" href="https://factory.talos.dev">
+    Generate custom Talos images with extensions
+  </Card>
+  <Card title="Extensions Repository" icon="github" href="https://github.com/siderolabs/extensions">
+    Browse official Talos extensions
+  </Card>
+</CardGroup>
